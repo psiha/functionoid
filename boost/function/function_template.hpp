@@ -426,7 +426,18 @@ private:
                     throw_test_signature,
                     &nothrow_test<unwrap_reference<F>::type>,
                     &throw_test  <unwrap_reference<F>::type>
-                >::is_nothrow;
+				>::is_nothrow;
+
+		#if defined(BOOST_MSVC) && BOOST_MSVC == 1400
+		    // MSVC++ 8.0 (SP1) linker reports "unresolved external symbol"
+		    // errors (which are erroneous themselves as the symbols do exist
+		    // and the binary works properly when linked with /FORCE) for the
+		    // test functions so we force their inclusion here. This is below
+		    // the return statement so as not to generate any code, this does
+		    // not generate any warning with the targeted compiler.
+			static throw_test_signature * const nothrower( &nothrow_test<unwrap_reference<F>::type> );
+			static throw_test_signature * const   thrower( &throw_test  <unwrap_reference<F>::type> );
+		#endif
     }
 
 
@@ -597,34 +608,34 @@ private:
 */
   };
 
-  template<typename R BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_PARMS>
+  template<typename R BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_PARMS, class PolicyList>
   inline void swap(BOOST_FUNCTION_FUNCTION<
                      R BOOST_FUNCTION_COMMA
-                     BOOST_FUNCTION_TEMPLATE_ARGS
+                     BOOST_FUNCTION_TEMPLATE_ARGS, PolicyList
                    >& f1,
                    BOOST_FUNCTION_FUNCTION<
                      R BOOST_FUNCTION_COMMA
-                     BOOST_FUNCTION_TEMPLATE_ARGS
+                     BOOST_FUNCTION_TEMPLATE_ARGS, PolicyList
                    >& f2)
   {
     f1.swap(f2);
   }
 
 // Poison comparisons between boost::function objects of the same type.
-template<typename R BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_PARMS>
+template<typename R BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_PARMS, class PolicyList>
   void operator==(const BOOST_FUNCTION_FUNCTION<
                           R BOOST_FUNCTION_COMMA
-                          BOOST_FUNCTION_TEMPLATE_ARGS>&,
+                          BOOST_FUNCTION_TEMPLATE_ARGS, PolicyList>&,
                   const BOOST_FUNCTION_FUNCTION<
                           R BOOST_FUNCTION_COMMA
-                          BOOST_FUNCTION_TEMPLATE_ARGS>&);
-template<typename R BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_PARMS>
+                          BOOST_FUNCTION_TEMPLATE_ARGS, PolicyList>&);
+template<typename R BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_PARMS, class PolicyList>
   void operator!=(const BOOST_FUNCTION_FUNCTION<
                           R BOOST_FUNCTION_COMMA
-                          BOOST_FUNCTION_TEMPLATE_ARGS>&,
+                          BOOST_FUNCTION_TEMPLATE_ARGS, PolicyList>&,
                   const BOOST_FUNCTION_FUNCTION<
                           R BOOST_FUNCTION_COMMA
-                          BOOST_FUNCTION_TEMPLATE_ARGS>& );
+                          BOOST_FUNCTION_TEMPLATE_ARGS, PolicyList>& );
 
 #if !defined(BOOST_FUNCTION_NO_FUNCTION_TYPE_SYNTAX)
 
