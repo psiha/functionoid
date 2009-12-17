@@ -539,7 +539,7 @@ namespace boost {
               std::size_t const storage_array_size( in_buffer.trivial_heap_obj.size );
               out_buffer.trivial_heap_obj.ptr  = new storage_atom[ storage_array_size ];
               out_buffer.trivial_heap_obj.size = storage_array_size;
-              std::memcpy( functor_ptr( out_buffer ), functor_ptr( in_buffer ), storage_array_size );
+              std::memcpy( functor_ptr( out_buffer ), functor_ptr( in_buffer ), storage_array_size * sizeof( storage_atom ) );
           }
 
           static void move( function_buffer & in_buffer, function_buffer & out_buffer )
