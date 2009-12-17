@@ -18,4 +18,17 @@ Development is currently being done with MSVC++ 9.0 SP1 (with tests additionally
 performed with MSVC++ 8.0 SP1 and MSVC++ 10.0b2, compiling without /W4 warnings
 on all three compiler versions) so no jamfiles are provided yet.
 
+For the sake of brevity of future commit messages, comments etc. allow me to 
+add a few terminology definitions. Looking at the boost/tr1::function<> design/
+idea we can identify two 'domains':
+ - the "front side" or the interface side or the "fixed type" or ABI side. The
+interface that the user sees and the code that exists and executes _before_ the
+call through a function pointer in the vtable (e.g. the code in operator()
+before the invoke call is made, or code in operator= before calls to the manager
+are made ...)
+ - the "back side" or that which stands behind the 'function pointer brick wall'
+(the actual invoker and the actual manager), which changes with each
+assignement, which, at the point of change or creation has all the type
+information it wants.
+
 You can contact me/"the author" at dsaritz at gmail.com.
