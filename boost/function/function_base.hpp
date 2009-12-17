@@ -873,9 +873,14 @@ namespace boost {
       // that it can (more easily) be placed at the beginning of the vtable so
       // that a vtable pointer would actually point directly to it (thus
       // avoiding pointer offset calculation on invocation).
+      //  This also gives a unique/non-template vtable that can be held by
+      // function_base entirely but it also opens a window for erroneous vtable
+      // copying/assignment between different boost::function<> instantiations.
+      // A typed wrapper should therefor be added to the boost::function<>
+      // class to catch such errors at compile-time.
       struct vtable
       {
-        typedef void ( function_buffer_holder::* invoker_placeholder_type )( void );
+        typedef void ( function_buffer::* invoker_placeholder_type )( void );
         template<typename TargetInvokerType>
         TargetInvokerType const & invoker() const { return reinterpret_cast<TargetInvokerType const &>( void_invoker ); }
 

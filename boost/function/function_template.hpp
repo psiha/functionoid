@@ -73,32 +73,32 @@ namespace boost {
         typename R BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_PARMS
      >
      struct BOOST_FUNCTION_FUNCTION_OBJ_INVOKER : public function_buffer_holder
-      {
-        R invoke( BOOST_FUNCTION_PARMS )
-        {
-            // We provide the invoker with a manager with a minimum amount of
-            // type information (because it already knows the stored function
-            // object it works with, it only needs to get its address from a
-            // function_buffer object). Because of this we must cast the pointer
-            // returned by FunctionObjManager::functor_ptr() because it can be
-            // a plain void * in case of the trivial managers. In case of the
-            // trivial ptr manager it is even a void * * so a double static_cast
-            // (or a reinterpret_cast) is necessary.
-            FunctionObj & functionObject
-            (
-                *static_cast<FunctionObj *>
-                (
-                    static_cast<void *>
-                    (
-                        FunctionObjManager::functor_ptr( buffer )
-                    )
-                )
-            );
-            // unwrap_ref is needed because boost::reference_wrapper<T>, unlike
-            // the one from std::tr1,  does not support callable objects
-            return unwrap_ref( functionObject )( BOOST_FUNCTION_ARGS );
-        }
-      };
+     {
+       R invoke( BOOST_FUNCTION_PARMS )
+       {
+           // We provide the invoker with a manager with a minimum amount of
+           // type information (because it already knows the stored function
+           // object it works with, it only needs to get its address from a
+           // function_buffer object). Because of this we must cast the pointer
+           // returned by FunctionObjManager::functor_ptr() because it can be
+           // a plain void * in case of the trivial managers. In case of the
+           // trivial ptr manager it is even a void * * so a double static_cast
+           // (or a reinterpret_cast) is necessary.
+           FunctionObj & functionObject
+           (
+               *static_cast<FunctionObj *>
+               (
+                   static_cast<void *>
+                   (
+                       FunctionObjManager::functor_ptr( buffer )
+                   )
+               )
+           );
+           // unwrap_ref is needed because boost::reference_wrapper<T>, unlike
+           // the one from std::tr1,  does not support callable objects
+           return unwrap_ref( functionObject )( BOOST_FUNCTION_ARGS );
+       }
+     };
 
       template
       <
@@ -449,29 +449,32 @@ private:
         throw()
     #endif
     {
-        typedef result_type (detail::function::function_buffer_holder::* invoker_type)(BOOST_FUNCTION_TEMPLATE_ARGS);
-        return (reinterpret_cast<detail::function::function_buffer_holder &>( this->functor ).*get_vtable().invoker<invoker_type>())
-               (BOOST_FUNCTION_ARGS);
+        typedef result_type (detail::function::function_buffer::* invoker_type)(BOOST_FUNCTION_TEMPLATE_ARGS);
+        return (functor.*(get_vtable().invoker<invoker_type>()))(BOOST_FUNCTION_ARGS);
     }
 
     result_type invoke(BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::false_ /*throwable invoker*/) const
     {
-        typedef result_type (detail::function::function_buffer_holder::* invoker_type)(BOOST_FUNCTION_TEMPLATE_ARGS);
-        return (reinterpret_cast<detail::function::function_buffer_holder &>( this->functor ).*get_vtable().invoker<invoker_type>())
-               (BOOST_FUNCTION_ARGS);
+        typedef result_type (detail::function::function_buffer::* invoker_type)(BOOST_FUNCTION_TEMPLATE_ARGS);
+        return (functor.*(get_vtable().invoker<invoker_type>()))(BOOST_FUNCTION_ARGS);
+    }
+
+    //  This overload should not actually be for a 'complete' BOOST_FUNCTION_FUNCTION as it is enough
+	// for the signature template parameter to be the same (and therefor the vtable is the same, with
+	// a possibly exception being the case of an empty source as empty handler vtables depend on the
+	// policy as well as the signature).
+    template <typename ActualFunctor>
+    static vtable_type const & vtable_for_functor( BOOST_FUNCTION_FUNCTION const & functor )
+    {
+      BOOST_STATIC_ASSERT(( is_same<ActualFunctor, BOOST_FUNCTION_FUNCTION>::value ));
+      return functor.get_vtable();
     }
 
     template <typename ActualFunctor, typename StoredFunctor>
-    typename enable_if<is_base_of<function_base, StoredFunctor>, vtable_type const &>::type
-    static vtable_for_functor( StoredFunctor const & functor )
+    static vtable_type const & vtable_for_functor( StoredFunctor const & /*functor*/ )
     {
-        return functor.get_vtable();
-    }
+      BOOST_STATIC_ASSERT(( !is_same<StoredFunctor, BOOST_FUNCTION_FUNCTION>::value ));
 
-    template <typename ActualFunctor, typename StoredFunctor>
-    typename disable_if<is_base_of<function_base, StoredFunctor>, vtable_type const &>::type
-    static vtable_for_functor( StoredFunctor const & /*functor*/ )
-    {
       using namespace detail::function;
 
       // A minimally typed manager is used for the invoker (anti-code-bloat).
