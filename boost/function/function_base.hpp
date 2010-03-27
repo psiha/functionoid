@@ -16,9 +16,9 @@
 #include <string>
 #include <memory>
 #include <new>
-#ifndef BOOST_NO_TYPEID
-    #include <typeinfo>
-#endif // BOOST_NO_TYPEID
+#ifndef BOOST_FUNCTION_NO_RTTI
+    #include <boost/detail/sp_typeinfo.hpp>
+#endif // BOOST_FUNCTION_NO_RTTI
 #include <boost/config.hpp>
 #include <boost/assert.hpp>
 #include <boost/integer.hpp>
@@ -37,6 +37,7 @@
 #include <boost/type_traits/is_function.hpp>
 #include <boost/type_traits/is_fundamental.hpp>
 #include <boost/type_traits/is_integral.hpp>
+#include <boost/type_traits/is_member_pointer.hpp>
 #include <boost/type_traits/is_object.hpp>
 #include <boost/type_traits/is_stateless.hpp>
 #include <boost/type_traits/is_volatile.hpp>
@@ -80,7 +81,9 @@
 
 // Borrowed from Boost.Python library: determines the cases where we
 // need to use std::type_info::name to compare instead of operator==.
-# if (defined(__GNUC__) && __GNUC__ >= 3) \
+#if defined( BOOST_NO_TYPEID )
+#  define BOOST_FUNCTION_COMPARE_TYPE_ID(X,Y) ((X)==(Y))
+#elif (defined(__GNUC__) && __GNUC__ >= 3) \
  || defined(_AIX) \
  || (   defined(__sgi) && defined(__host_mips))
 #  include <cstring>
@@ -115,7 +118,7 @@ namespace boost {
   namespace detail {
     namespace function {
 
-    #ifndef BOOST_NO_TYPEID
+    #ifndef BOOST_FUNCTION_NO_RTTI
       // For transferring stored function object type information back to the
       // interface side.
       class typed_functor : noncopyable
@@ -124,15 +127,15 @@ namespace boost {
           template <typename Functor>
           typed_functor( Functor & functor )
               :
-              pFunctor          ( addressof( functor )        ),
-              type_id           ( typeid( Functor )           ),
+              pFunctor          ( addressof      ( functor )  ),
+              type_id           ( BOOST_SP_TYPEID( Functor )  ),
               const_qualified   ( is_const   <Functor>::value ),
               volatile_qualified( is_volatile<Functor>::value )
           {
               assert( pFunctor );
           }
 
-          BOOST_FUNCTION_STD_NS::type_info const & functor_type_info() const { return type_id; }
+          detail::sp_typeinfo const & functor_type_info() const { return type_id; }
 
           template <typename Functor>
           Functor * target()
@@ -143,7 +146,7 @@ namespace boost {
                      (
                          get_functor_if_types_match
                          (
-                             typeid( Functor ),
+                             BOOST_SP_TYPEID( Functor ),
                              is_const   <Functor>::value,
                              is_volatile<Functor>::value
                          )
@@ -153,7 +156,7 @@ namespace boost {
       private:
           void * get_functor_if_types_match
           (
-            BOOST_FUNCTION_STD_NS::type_info const & other,
+            detail::sp_typeinfo const & other,
             bool const other_const_qualified,
             bool const other_volatile_qualified
           )
@@ -172,14 +175,14 @@ namespace boost {
           }
 
       private:
-          void const * const pFunctor;
-          BOOST_FUNCTION_STD_NS::type_info const & type_id;
+          void                const * const pFunctor;
+          detail::sp_typeinfo const &       type_id ;
           // Whether the type is const-qualified.
           bool const const_qualified;
           // Whether the type is volatile-qualified.
           bool const volatile_qualified;
       };
-    #endif // BOOST_NO_TYPEID
+    #endif // BOOST_FUNCTION_NO_RTTI
 
       /**
        * A buffer used to store small function objects in
@@ -382,7 +385,7 @@ namespace boost {
       >
       class functor_type_info
       {
-      #ifndef BOOST_NO_TYPEID
+      #ifndef BOOST_FUNCTION_NO_RTTI
       private:
           template <bool is_ref_wrapper, bool is_member_pointer>
           static ActualFunctor * actual_functor_ptr( StoredFunctor * storedFunctor );
@@ -421,7 +424,7 @@ namespace boost {
               ActualFunctor * const pActualFunctor( actual_functor_ptr<is_reference_wrapper<StoredFunctor>::value, is_member_pointer<ActualFunctor>::value>( pStoredFunctor ) );
               return typed_functor( *pActualFunctor );
           }
-      #endif // BOOST_NO_TYPEID
+      #endif // BOOST_FUNCTION_NO_RTTI
       };
 
       // A helper wrapper class that adds type information functionality (e.g.
@@ -760,14 +763,14 @@ namespace boost {
             wrapper_allocator.deallocate(victim,1);
             out_buffer.obj_ptr = 0;
           } else if (op == check_functor_type_tag) {
-            const BOOST_FUNCTION_STD_NS::type_info& check_type 
+            const detail::sp_typeinfo& check_type 
               = *out_buffer.type.type;
-            if (BOOST_FUNCTION_COMPARE_TYPE_ID(check_type, typeid(Functor)))
+            if (BOOST_FUNCTION_COMPARE_TYPE_ID(check_type, BOOST_SP_TYPEID(Functor)))
               out_buffer.obj_ptr = in_buffer.obj_ptr;
             else
               out_buffer.obj_ptr = 0;
           } else { // op == get_functor_type_tag
-            out_buffer.type.type = &typeid(Functor);
+            out_buffer.type.type = &BOOST_SP_TYPEID(Functor);
             out_buffer.type.const_qualified = false;
             out_buffer.type.volatile_qualified = false;
           }
@@ -794,7 +797,7 @@ namespace boost {
           typedef typename get_function_tag<functor_type>::type tag_type;
           switch (op) {
           case get_functor_type_tag:
-            out_buffer.type.type = &typeid(functor_type);
+            out_buffer.type.type = &BOOST_SP_TYPEID(functor_type);
             out_buffer.type.const_qualified = false;
             out_buffer.type.volatile_qualified = false;
             return;
@@ -903,7 +906,7 @@ namespace boost {
         void (& do_move    )( function_buffer       & in_buffer, function_buffer & out_buffer );
         void (& do_destroy )( function_buffer       & buffer                                  );
 
-      #ifndef BOOST_NO_TYPEID
+      #ifndef BOOST_FUNCTION_NO_RTTI
         // Because of the MSVC issue described above we mark the
         // get_typed_functor function as nothrow like this, explicitly (because
         // MSVC does not properly support exception specifications this is not a
@@ -911,9 +914,9 @@ namespace boost {
         typed_functor (& get_typed_functor )( function_buffer const & )
         #ifdef BOOST_MSVC
             throw()
-        #endif
+        #endif // BOOST_MSVC
         ;
-      #endif // BOOST_NO_TYPEID
+      #endif // BOOST_FUNCTION_NO_RTTI
 
 
 /*    ALLOCATOR SUPPORT TEMPORARILY COMMENTED OUT
@@ -948,9 +951,9 @@ namespace boost {
           &Manager::clone,
           &Manager::move,
           &Manager::destroy
-        #ifndef BOOST_NO_TYPEID
+        #ifndef BOOST_FUNCTION_NO_RTTI
           ,&Manager::get_typed_functor
-        #endif // BOOST_NO_TYPEID
+        #endif // BOOST_FUNCTION_NO_RTTI
       };
     } // end namespace function
   } // end namespace detail
@@ -1034,14 +1037,14 @@ public:
 
     safe_mover_base::move( tmp, other, empty_handler_vtable );
 
-    my_restorer.cancel();
+    my_restorer   .cancel();
     other_restorer.cancel();
   }
 
-#ifndef BOOST_NO_TYPEID
+#ifndef BOOST_FUNCTION_NO_RTTI
 
   /// Retrieve the type of the stored function object.
-  const BOOST_FUNCTION_STD_NS::type_info& target_type() const
+  const detail::sp_typeinfo& target_type() const
   {
     return get_vtable().get_typed_functor( this->functor ).functor_type_info();
   }
@@ -1096,7 +1099,7 @@ public:
     }
 #endif
 
-#endif // BOOST_NO_TYPEID
+#endif // BOOST_FUNCTION_NO_RTTI
 
 public: // should be protected, but GCC 2.95.3 will fail to allow access
   detail::function::vtable const & get_vtable() const
@@ -1667,8 +1670,8 @@ namespace detail {
     template
     <
         typename T,
-        // this has to be placed here and not in the struct body because that
-        // kills msvc
+        // This had to be placed here and not in the struct body because that
+        // bugs MSVC.
         typename StorageType = typename get_non_type_template_parameter_type<T>::type
     >
     struct static_reference_maker : public boost::reference_wrapper<T>
