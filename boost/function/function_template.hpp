@@ -95,7 +95,7 @@ namespace boost {
                )
            );
            // unwrap_ref is needed because boost::reference_wrapper<T>, unlike
-           // the one from std::tr1,  does not support callable objects
+           // the one from std::tr1, does not support callable objects.
            return unwrap_ref( functionObject )( BOOST_FUNCTION_ARGS );
        }
      };
@@ -110,7 +110,7 @@ namespace boost {
       {
           BOOST_FUNCTION_VOID_RETURN_TYPE invoke(BOOST_FUNCTION_PARMS)
           {
-              // see the above comments for the non-void invoker
+              // See the above comments for the non-void invoker.
               FunctionObj & functionObject( *static_cast<FunctionObj *>( static_cast<void *>( FunctionObjManager::functor_ptr( buffer ) ) ) );
               BOOST_FUNCTION_RETURN( unwrap_ref( functionObject )( BOOST_FUNCTION_ARGS ) );
           }
