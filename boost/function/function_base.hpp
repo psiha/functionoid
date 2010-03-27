@@ -61,6 +61,8 @@
 #include <boost/function_equal.hpp>
 #include <boost/function/function_fwd.hpp>
 
+#include <boost/function/detail/safe_bool.hpp>
+
 #if defined(BOOST_MSVC)
 #   pragma warning( push )
 #   pragma warning( disable : 4127 ) // "conditional expression is constant"
@@ -1252,9 +1254,6 @@ protected:
       tmp.pVTable = &functor_vtable;
       this->swap<EmptyHandler>( tmp, empty_handler_vtable );
   }
-
-  struct dummy { void nonnull() {}; };
-  typedef void (dummy::*safe_bool)();
 
 private:
     #ifdef BOOST_MSVC
