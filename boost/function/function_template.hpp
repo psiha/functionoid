@@ -382,16 +382,9 @@ namespace boost {
         return function_base::swap<base_empty_handler>( other, empty_handler_vtable() );
     }
 
-#if (defined __SUNPRO_CC) && (__SUNPRO_CC <= 0x530) && !(defined BOOST_NO_COMPILER_CONFIG)
-    // Sun C++ 5.3 can't handle the safe_bool idiom, so don't use it
-    operator bool () const { return !this->empty(); }
-#else
   public:
-    operator safe_bool () const
-      { return (this->empty())? 0 : &dummy::nonnull; }
-
+    BOOST_SAFE_BOOL_FOR_TEMPLATE_FROM_FUNCTION( BOOST_FUNCTION_FUNCTION, !empty );
     bool operator!() const { return this->empty(); }
-#endif
 
 private:
     static vtable_type const & empty_handler_vtable() { return vtable_for_functor<base_empty_handler>( my_empty_handler() ); }
@@ -461,20 +454,19 @@ private:
 
     //  This overload should not actually be for a 'complete' BOOST_FUNCTION_FUNCTION as it is enough
 	// for the signature template parameter to be the same (and therefor the vtable is the same, with
-	// a possibly exception being the case of an empty source as empty handler vtables depend on the
+	// a possible exception being the case of an empty source as empty handler vtables depend on the
 	// policy as well as the signature).
     template <typename ActualFunctor>
     static vtable_type const & vtable_for_functor( BOOST_FUNCTION_FUNCTION const & functor )
     {
-      BOOST_STATIC_ASSERT(( is_same<ActualFunctor, BOOST_FUNCTION_FUNCTION>::value ));
+      BOOST_STATIC_ASSERT(( is_base_of<BOOST_FUNCTION_FUNCTION, ActualFunctor>::value ));
       return functor.get_vtable();
     }
 
     template <typename ActualFunctor, typename StoredFunctor>
-    static vtable_type const & vtable_for_functor( StoredFunctor const & /*functor*/ )
+    typename disable_if<is_base_of<BOOST_FUNCTION_FUNCTION, StoredFunctor>, vtable_type const &>::type
+    static vtable_for_functor( StoredFunctor const & /*functor*/ )
     {
-      BOOST_STATIC_ASSERT(( !is_same<StoredFunctor, BOOST_FUNCTION_FUNCTION>::value ));
-
       using namespace detail::function;
 
       // A minimally typed manager is used for the invoker (anti-code-bloat).
