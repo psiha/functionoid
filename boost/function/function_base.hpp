@@ -80,6 +80,7 @@
 #else
 #  define BOOST_FUNCTION_STD_NS std
 #endif
+#endif // BOOST_NO_TYPEID
 
 // Borrowed from Boost.Python library: determines the cases where we
 // need to use std::type_info::name to compare instead of operator==.
@@ -94,7 +95,7 @@
 # else
 #  define BOOST_FUNCTION_COMPARE_TYPE_ID(X,Y) ((X)==(Y))
 #endif
-#endif // BOOST_NO_TYPEID
+
 
 #if defined(BOOST_MSVC) && BOOST_MSVC <= 1300 || defined(__ICL) && __ICL <= 600 || defined(__MWERKS__) && __MWERKS__ < 0x2406 && !defined(BOOST_STRICT_CONFIG)
 #  define BOOST_FUNCTION_TARGET_FIX(x) x
