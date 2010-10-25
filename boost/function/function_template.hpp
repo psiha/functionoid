@@ -604,7 +604,7 @@ private:
             // for the clear and the one, for the else case, further down in 
             // assign) when the nothrow policy is specified...this should be
             // fixed...
-            assert( is_nothrow<my_empty_handler>() );
+            BOOST_ASSERT( is_nothrow<my_empty_handler>() );
             base_empty_handler const emptyHandler;
             function_base::assign<direct, base_empty_handler>
             (
