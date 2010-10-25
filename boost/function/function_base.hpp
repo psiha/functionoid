@@ -82,6 +82,13 @@
 #endif
 #endif // BOOST_NO_TYPEID
 
+#if defined( BOOST_MSVC ) || defined( __GNUC__ ) || defined( __BORLANDC__ )
+    #define BOOST_FUNCTION_FASTCALL __fastcall
+#else
+    #define BOOST_FUNCTION_FASTCALL
+#endif
+
+
 // Borrowed from Boost.Python library: determines the cases where we
 // need to use std::type_info::name to compare instead of operator==.
 #if defined( BOOST_NO_TYPEID )
@@ -436,7 +443,7 @@ namespace boost {
               return pStoredFunctor;
           }
       public:
-          static typed_functor get_typed_functor( function_buffer const & buffer )
+          static typed_functor BOOST_FUNCTION_FASTCALL get_typed_functor( function_buffer const & buffer )
           {
               StoredFunctor * const pStoredFunctor( FunctorManager::functor_ptr( const_cast<function_buffer &>( buffer ) ) );
               ActualFunctor * const pActualFunctor( actual_functor_ptr<is_reference_wrapper<StoredFunctor>::value, is_member_pointer<ActualFunctor>::value>( pStoredFunctor ) );
@@ -476,18 +483,18 @@ namespace boost {
               new ( functor_ptr( out_buffer ) ) Functor( functor );
           }
 
-          static void clone( const function_buffer& in_buffer, function_buffer& out_buffer )
+          static void BOOST_FUNCTION_FASTCALL clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
               return assign( *functor_ptr( in_buffer ), out_buffer );
           }
 
-          static void move( function_buffer & in_buffer, function_buffer& out_buffer )
+          static void BOOST_FUNCTION_FASTCALL move( function_buffer & in_buffer, function_buffer & out_buffer )
           {
               clone( in_buffer, out_buffer );
               destroy( in_buffer );
           }
 
-          static void destroy( function_buffer& buffer )
+          static void BOOST_FUNCTION_FASTCALL destroy( function_buffer & buffer )
           {
               //...probably unnecessary
               *functor_ptr( buffer ) = 0;
@@ -511,18 +518,18 @@ namespace boost {
               new ( functor_ptr( out_buffer ) ) Functor( functor );
           }
 
-          static void clone( function_buffer const & in_buffer, function_buffer & out_buffer )
+          static void BOOST_FUNCTION_FASTCALL clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
               return assign( in_buffer, out_buffer );
           }
 
-          static void move( function_buffer & in_buffer, function_buffer & out_buffer )
+          static void BOOST_FUNCTION_FASTCALL move( function_buffer & in_buffer, function_buffer & out_buffer )
           {
               clone( in_buffer, out_buffer );
               destroy( in_buffer );
           }
 
-          static void destroy( function_buffer & buffer )
+          static void BOOST_FUNCTION_FASTCALL destroy( function_buffer & buffer )
           {
               //...probably unnecessary
               std::memset( &buffer, 0, sizeof( buffer ) );
@@ -555,7 +562,7 @@ namespace boost {
               return clone( in_buffer, out_buffer );
           }
 
-          static void clone( function_buffer const & in_buffer, function_buffer & out_buffer )
+          static void BOOST_FUNCTION_FASTCALL clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
               std::size_t const storage_array_size( in_buffer.trivial_heap_obj.size );
               out_buffer.trivial_heap_obj.ptr  = new storage_atom[ storage_array_size ];
@@ -563,14 +570,14 @@ namespace boost {
               std::memcpy( functor_ptr( out_buffer ), functor_ptr( in_buffer ), storage_array_size * sizeof( storage_atom ) );
           }
 
-          static void move( function_buffer & in_buffer, function_buffer & out_buffer )
+          static void BOOST_FUNCTION_FASTCALL move( function_buffer & in_buffer, function_buffer & out_buffer )
           {
               out_buffer.trivial_heap_obj = in_buffer.trivial_heap_obj;
               //...probably unnecessary
               in_buffer.trivial_heap_obj.ptr = 0;
           }
 
-          static void destroy( function_buffer & buffer )
+          static void BOOST_FUNCTION_FASTCALL destroy( function_buffer & buffer )
           {
               delete [] functor_ptr( buffer );
               //...probably unnecessary
@@ -593,20 +600,20 @@ namespace boost {
               new ( functor_ptr( out_buffer ) ) Functor( functor );
           }
 
-          static void clone( function_buffer const & in_buffer, function_buffer & out_buffer )
+          static void BOOST_FUNCTION_FASTCALL clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
               Functor const & in_functor( *functor_ptr( in_buffer ) );
               return assign( in_functor, out_buffer );
           }
 
-          static void move( function_buffer & in_buffer, function_buffer & out_buffer )
+          static void BOOST_FUNCTION_FASTCALL move( function_buffer & in_buffer, function_buffer & out_buffer )
           {
               // ...use swap here?
               clone( in_buffer, out_buffer );
               destroy( in_buffer );
           }
 
-          static void destroy( function_buffer & buffer )
+          static void BOOST_FUNCTION_FASTCALL destroy( function_buffer & buffer )
           {
               functor_ptr( buffer )->~Functor();
           }
@@ -924,16 +931,16 @@ namespace boost {
       public: // "Private but not private" to enable aggregate-style initialization.
         invoker_placeholder_type const void_invoker;
 
-        void (& do_clone   )( function_buffer const & in_buffer, function_buffer & out_buffer );
-        void (& do_move    )( function_buffer       & in_buffer, function_buffer & out_buffer );
-        void (& do_destroy )( function_buffer       & buffer                                  );
+        void (BOOST_FUNCTION_FASTCALL & do_clone   )( function_buffer const & in_buffer, function_buffer & out_buffer );
+        void (BOOST_FUNCTION_FASTCALL & do_move    )( function_buffer       & in_buffer, function_buffer & out_buffer );
+        void (BOOST_FUNCTION_FASTCALL & do_destroy )( function_buffer       & buffer                                  );
 
       #ifndef BOOST_FUNCTION_NO_RTTI
         // Because of the MSVC issue described above we mark the
         // get_typed_functor function as nothrow like this, explicitly (because
         // MSVC does not properly support exception specifications this is not a
         // pessimization...it is equivalent to __declspec( nothrow )).
-        typed_functor (& get_typed_functor)( function_buffer const & )
+        typed_functor (BOOST_FUNCTION_FASTCALL & get_typed_functor)( function_buffer const & )
         #ifdef BOOST_MSVC
             throw()
         #endif // BOOST_MSVC
@@ -1289,11 +1296,6 @@ protected:
   }
 
 private:
-    #ifdef BOOST_MSVC
-    //  MSVC (9.0 SP1) inlines this even with /Oxs for (probably) no gain so we
-    // force it not to (anti-code-bloat).
-      __declspec( noinline nothrow )
-    #endif
     void destroy() { get_vtable().destroy( this->functor ); }
 
 protected:
@@ -1316,20 +1318,20 @@ protected:
         emptyFunctionToMoveTo_( emptyFunctionToMoveTo              ),
         empty_handler_vtable_ ( emptyFunctionToMoveTo.get_vtable() )
     {
-        assert( emptyFunctionToMoveTo.pVTable == &empty_handler_vtable_ );
+        BOOST_ASSERT( emptyFunctionToMoveTo.pVTable == &empty_handler_vtable_ );
         move( functionToGuard, emptyFunctionToMoveTo, empty_handler_vtable_ );
     }
 
     ~safe_mover_base() {}
 
 public:
-    void cancel() { assert( pFunctionToRestoreTo ); pFunctionToRestoreTo = 0; }
+    void cancel() { BOOST_ASSERT( pFunctionToRestoreTo ); pFunctionToRestoreTo = 0; }
 
     static void move( function_base & source, function_base & destination, vtable const & empty_handler_vtable )
     {
         source.get_vtable().move( source.functor, destination.functor );
         destination.pVTable = source.pVTable;
-        source.pVTable = &empty_handler_vtable;
+        source     .pVTable = &empty_handler_vtable;
     }
 
 protected:
@@ -1399,7 +1401,7 @@ public:
     template <class result_type>
     result_type operator()() const
     {
-        assert( !"call to empty boost::function" );
+        BOOST_ASSERT( !"Call to empty boost::function!" );
         return result_type();
     }
 };
@@ -1619,6 +1621,7 @@ namespace detail {
 #undef BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL
 #undef BOOST_FUNCTION_COMPARE_TYPE_ID
 #undef BOOST_FUNCTION_ENABLE_IF_FUNCTION
+#undef BOOST_FUNCTION_FASTCALL
 
 // ...to be moved 'somewhere else'...
 namespace boost {
