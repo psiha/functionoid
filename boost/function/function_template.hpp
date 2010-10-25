@@ -73,7 +73,13 @@ namespace boost {
      >
      struct BOOST_FUNCTION_FUNCTION_OBJ_INVOKER : public function_buffer_holder
      {
-       static R free_invoke( function_buffer & buffer BOOST_FUNCTION_COMMA BOOST_FUNCTION_PARMS )
+       // Implementation note:
+       //   The buffer argument comes last so that the stack layout in the
+       // invoker would be as similar as possible to the one expected by the
+       // target (with the assumption of a cdecl-like right-to-left argument
+       // order).
+       //                                         (25.10.2010.) (Domagoj Saric)
+       static R free_invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA function_buffer & buffer )
        {
            // We provide the invoker with a manager with a minimum amount of
            // type information (because it already knows the stored function
@@ -100,7 +106,7 @@ namespace boost {
 
        R bound_invoke( BOOST_FUNCTION_PARMS )
        {
-           return free_invoke( buffer BOOST_FUNCTION_COMMA BOOST_FUNCTION_ARGS );
+           return free_invoke( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA buffer );
        }
      };
 
@@ -112,7 +118,7 @@ namespace boost {
       >
       struct BOOST_FUNCTION_VOID_FUNCTION_OBJ_INVOKER : public function_buffer_holder
       {
-          static BOOST_FUNCTION_VOID_RETURN_TYPE free_invoke( function_buffer & buffer BOOST_FUNCTION_COMMA BOOST_FUNCTION_PARMS )
+          static BOOST_FUNCTION_VOID_RETURN_TYPE free_invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA function_buffer & buffer )
           {
               // See the above comments for the non-void invoker.
               FunctionObj & functionObject( *static_cast<FunctionObj *>( static_cast<void *>( FunctionObjManager::functor_ptr( buffer ) ) ) );
@@ -121,7 +127,7 @@ namespace boost {
 
           BOOST_FUNCTION_VOID_RETURN_TYPE bound_invoke( BOOST_FUNCTION_PARMS )
           {
-              BOOST_FUNCTION_RETURN( free_invoke( buffer BOOST_FUNCTION_COMMA BOOST_FUNCTION_ARGS ) );
+              BOOST_FUNCTION_RETURN( free_invoke( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA ) );
           }
       };
     } // end namespace function
@@ -468,8 +474,8 @@ private:
 
     result_type do_invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::false_ /*free call*/ ) const
     {
-        typedef result_type (* invoker_type)(detail::function::function_buffer & BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_ARGS);
-        return get_vtable().invoker<invoker_type>()( functor BOOST_FUNCTION_COMMA BOOST_FUNCTION_ARGS );
+        typedef result_type (* invoker_type)( BOOST_FUNCTION_TEMPLATE_ARGS BOOST_FUNCTION_COMMA detail::function::function_buffer & );
+        return get_vtable().invoker<invoker_type>()( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA functor );
     }
 
 
