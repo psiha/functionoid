@@ -127,7 +127,7 @@ namespace boost {
 
           BOOST_FUNCTION_VOID_RETURN_TYPE bound_invoke( BOOST_FUNCTION_PARMS )
           {
-              BOOST_FUNCTION_RETURN( free_invoke( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA ) );
+              BOOST_FUNCTION_RETURN( free_invoke( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA buffer ) );
           }
       };
     } // end namespace function
