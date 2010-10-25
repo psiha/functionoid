@@ -11,7 +11,6 @@
 // Note: this header is a header template and must NOT have multiple-inclusion
 // protection.
 #include <boost/function/detail/prologue.hpp>
-#include <boost/detail/no_exceptions_support.hpp>
 
 #if defined(BOOST_MSVC)
 #   pragma warning( push )
@@ -74,7 +73,7 @@ namespace boost {
      >
      struct BOOST_FUNCTION_FUNCTION_OBJ_INVOKER : public function_buffer_holder
      {
-       R invoke( BOOST_FUNCTION_PARMS )
+       static R free_invoke( function_buffer & buffer BOOST_FUNCTION_COMMA BOOST_FUNCTION_PARMS )
        {
            // We provide the invoker with a manager with a minimum amount of
            // type information (because it already knows the stored function
@@ -98,6 +97,11 @@ namespace boost {
            // the one from std::tr1, does not support callable objects.
            return unwrap_ref( functionObject )( BOOST_FUNCTION_ARGS );
        }
+
+       R bound_invoke( BOOST_FUNCTION_PARMS )
+       {
+           return free_invoke( buffer BOOST_FUNCTION_COMMA BOOST_FUNCTION_ARGS );
+       }
      };
 
       template
@@ -108,11 +112,16 @@ namespace boost {
       >
       struct BOOST_FUNCTION_VOID_FUNCTION_OBJ_INVOKER : public function_buffer_holder
       {
-          BOOST_FUNCTION_VOID_RETURN_TYPE invoke(BOOST_FUNCTION_PARMS)
+          static BOOST_FUNCTION_VOID_RETURN_TYPE free_invoke( function_buffer & buffer BOOST_FUNCTION_COMMA BOOST_FUNCTION_PARMS )
           {
               // See the above comments for the non-void invoker.
               FunctionObj & functionObject( *static_cast<FunctionObj *>( static_cast<void *>( FunctionObjManager::functor_ptr( buffer ) ) ) );
               BOOST_FUNCTION_RETURN( unwrap_ref( functionObject )( BOOST_FUNCTION_ARGS ) );
+          }
+
+          BOOST_FUNCTION_VOID_RETURN_TYPE bound_invoke( BOOST_FUNCTION_PARMS )
+          {
+              BOOST_FUNCTION_RETURN( free_invoke( buffer BOOST_FUNCTION_COMMA BOOST_FUNCTION_ARGS ) );
           }
       };
     } // end namespace function
@@ -437,20 +446,32 @@ private:
     #ifdef BOOST_MSVC
         __declspec( nothrow )
     #endif
-    result_type invoke(BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::true_ /*no throw invoker*/) const
+    result_type invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::true_ /*no throw invoker*/ ) const
     #ifndef BOOST_MSVC
         throw()
     #endif
+    {
+        return do_invoke( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA detail::function::thiscall_optimization_available() );
+    }
+
+    result_type invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::false_ /*throwable invoker*/ ) const
+    {
+        return do_invoke( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA detail::function::thiscall_optimization_available() );
+    }
+
+
+    result_type do_invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::true_ /*this call*/ ) const
     {
         typedef result_type (detail::function::function_buffer::* invoker_type)(BOOST_FUNCTION_TEMPLATE_ARGS);
         return (functor.*(get_vtable().invoker<invoker_type>()))(BOOST_FUNCTION_ARGS);
     }
 
-    result_type invoke(BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::false_ /*throwable invoker*/) const
+    result_type do_invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::false_ /*free call*/ ) const
     {
-        typedef result_type (detail::function::function_buffer::* invoker_type)(BOOST_FUNCTION_TEMPLATE_ARGS);
-        return (functor.*(get_vtable().invoker<invoker_type>()))(BOOST_FUNCTION_ARGS);
+        typedef result_type (* invoker_type)(detail::function::function_buffer & BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_ARGS);
+        return get_vtable().invoker<invoker_type>()( functor BOOST_FUNCTION_COMMA BOOST_FUNCTION_ARGS );
     }
+
 
     //  This overload should not actually be for a 'complete' BOOST_FUNCTION_FUNCTION as it is enough
 	// for the signature template parameter to be the same (and therefor the vtable is the same, with
