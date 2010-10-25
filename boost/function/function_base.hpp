@@ -121,6 +121,23 @@ namespace boost {
   namespace detail {
     namespace function {
 
+        struct thiscall_optimization_available_helper
+        {
+            static void free_function () {}
+                   void bound_function() {}
+
+            BOOST_STATIC_CONSTANT( bool, value = sizeof( &thiscall_optimization_available_helper::free_function ) == sizeof( &thiscall_optimization_available_helper::bound_function ) );
+        };
+
+        typedef mpl::bool_
+        <
+            //...zzz...MSVC10 does not like this...
+            //sizeof( &thiscall_optimization_available_helper::free_function  )
+            //    ==
+            //sizeof( &thiscall_optimization_available_helper::bound_function )
+            thiscall_optimization_available_helper::value
+        > thiscall_optimization_available;
+
     #ifndef BOOST_FUNCTION_NO_RTTI
       // For transferring stored function object type information back to the
       // interface side.
@@ -135,7 +152,7 @@ namespace boost {
               const_qualified   ( is_const   <Functor>::value ),
               volatile_qualified( is_volatile<Functor>::value )
           {
-              assert( pFunctor );
+              BOOST_ASSERT( pFunctor );
           }
 
           detail::sp_typeinfo const & functor_type_info() const { return type_id; }
@@ -143,8 +160,6 @@ namespace boost {
           template <typename Functor>
           Functor * target()
           {
-              // GCC 2.95.3 gets the CV qualifiers wrong here, so we
-              // can't do the static_cast that we should do.
               return static_cast<Functor *>
                      (
                          get_functor_if_types_match
@@ -195,14 +210,14 @@ namespace boost {
        */
       #ifdef BOOST_MSVC
         // http://msdn.microsoft.com/en-us/library/5ft82fed(VS.80).aspx (ad unions)
-        #define RESTRICT __restrict
+        #define BF_AUX_RESTRICT __restrict
       #else
-        #define RESTRICT
+        #define BF_AUX_RESTRICT
       #endif
       union function_buffer
       {
         // For pointers to function objects
-        void * RESTRICT obj_ptr;
+        void * BF_AUX_RESTRICT obj_ptr;
 
         //  For 'trivial' function objects (that can be managed without type
         // information) that must be allocated on the heap (we must only save
@@ -214,19 +229,19 @@ namespace boost {
         } trivial_heap_obj;
 
         // For function pointers of all kinds
-        void (* RESTRICT func_ptr)();
+        void (* BF_AUX_RESTRICT func_ptr)();
 
         // For bound member pointers
         struct bound_memfunc_ptr_t {
           class X;
-          void (X::*memfunc_ptr)(int);
-          void* obj_ptr;
+          void (X::* BF_AUX_RESTRICT memfunc_ptr)(int);
+          void * obj_ptr;
         } bound_memfunc_ptr;
 
         // To relax aliasing constraints
         char data;
       };
-      #undef RESTRICT
+      #undef BF_AUX_RESTRICT
 
       // A simple wrapper to allow deriving and a thiscall invoker.
       struct function_buffer_holder { function_buffer buffer; };
@@ -607,11 +622,7 @@ namespace boost {
 
           static Functor * & functor_ptr( function_buffer & buffer )
           {
-              // Clone the functor
-              // GCC 2.95.3 gets the CV qualifiers wrong here, so we
-              // can't do the static_cast that we should do.
-              // ...recheck the above comment after all these changes...
-              return (Functor * &)manager_trivial_heap::functor_ptr( buffer );
+              return static_cast<Functor * &>( manager_trivial_heap::functor_ptr( buffer ) );
           }
 
           static Functor * functor_ptr( function_buffer const & buffer )
@@ -886,7 +897,15 @@ namespace boost {
       // class to catch such errors at compile-time.
       struct vtable
       {
-        typedef void ( function_buffer::* invoker_placeholder_type )( void );
+        typedef void ( function_buffer::* this_call_invoker_placeholder_type )( void );
+        typedef void (                  * free_call_invoker_placeholder_type )( void );
+        typedef mpl::if_
+        <
+            thiscall_optimization_available,
+            this_call_invoker_placeholder_type,
+            free_call_invoker_placeholder_type
+        >::type invoker_placeholder_type;
+
         template<typename TargetInvokerType>
         TargetInvokerType const & invoker() const { return reinterpret_cast<TargetInvokerType const &>( void_invoker ); }
 
@@ -914,7 +933,7 @@ namespace boost {
         // get_typed_functor function as nothrow like this, explicitly (because
         // MSVC does not properly support exception specifications this is not a
         // pessimization...it is equivalent to __declspec( nothrow )).
-        typed_functor (& get_typed_functor )( function_buffer const & )
+        typed_functor (& get_typed_functor)( function_buffer const & )
         #ifdef BOOST_MSVC
             throw()
         #endif // BOOST_MSVC
@@ -941,7 +960,20 @@ namespace boost {
       };
 
       template <class Invoker, class Manager>
-      struct vtable_holder { static vtable const stored_vtable; };
+      struct vtable_holder
+      {
+          static vtable::this_call_invoker_placeholder_type get_invoker_pointer( mpl::true_ /*this call*/ )
+          {
+              return reinterpret_cast<vtable::this_call_invoker_placeholder_type>( &Invoker::bound_invoke );
+          }
+
+          static vtable::free_call_invoker_placeholder_type get_invoker_pointer( mpl::false_ /*free call*/ )
+          {
+              return reinterpret_cast<vtable::free_call_invoker_placeholder_type>( &Invoker::free_invoke );
+          }
+
+          static vtable const stored_vtable;
+      };
 
       // Note: it is extremely important that this initialization use
       // static initialization. Otherwise, we will have a race
@@ -950,7 +982,7 @@ namespace boost {
       template <class Invoker, class Manager>
       vtable const vtable_holder<Invoker, Manager>::stored_vtable =
       {
-          reinterpret_cast<vtable::invoker_placeholder_type>( &Invoker::invoke ),
+          vtable_holder<Invoker, Manager>::get_invoker_pointer( thiscall_optimization_available() ),
           &Manager::clone,
           &Manager::move,
           &Manager::destroy
@@ -1344,7 +1376,7 @@ private:
     #endif // BOOST_MSVC
     void throw_bad_call() const
     {
-        boost::throw_exception(bad_function_call());
+        boost::throw_exception( bad_function_call() );
     }
 
 public:
