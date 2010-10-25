@@ -466,14 +466,14 @@ namespace boost {
           public functor_type_info<ActualFunctor, StoredFunctor, typed_manager<FunctorManager, ActualFunctor, StoredFunctor>>
       {
           typedef StoredFunctor Functor;
-          static StoredFunctor * functor_ptr( function_buffer & buffer ) { return (StoredFunctor *)FunctorManager::functor_ptr( buffer ); }
+          static StoredFunctor * functor_ptr( function_buffer & buffer ) { return static_cast<StoredFunctor *>( FunctorManager::functor_ptr( buffer ) ); }
       };
 
       /// Manager for trivial objects that fit into sizeof( void * ).
       struct manager_ptr
       {
       public:
-          static void       *       * functor_ptr( function_buffer       & buffer ) { return &buffer.obj_ptr; }
+          static void       *       * functor_ptr( function_buffer       & buffer ) { __assume( buffer.obj_ptr ); return &buffer.obj_ptr; }
           static void const * const * functor_ptr( function_buffer const & buffer ) { return functor_ptr( const_cast<function_buffer &>( buffer ) ); }
 
           template <typename Functor>
@@ -496,8 +496,7 @@ namespace boost {
 
           static void BOOST_FUNCTION_FASTCALL destroy( function_buffer & buffer )
           {
-              //...probably unnecessary
-              *functor_ptr( buffer ) = 0;
+              //*functor_ptr( buffer ) = 0;
           }
       };
 
@@ -531,8 +530,7 @@ namespace boost {
 
           static void BOOST_FUNCTION_FASTCALL destroy( function_buffer & buffer )
           {
-              //...probably unnecessary
-              std::memset( &buffer, 0, sizeof( buffer ) );
+              //std::memset( &buffer, 0, sizeof( buffer ) );
           }
       };
 
@@ -543,7 +541,7 @@ namespace boost {
           typedef boost::aligned_storage<sizeof( void * ) * 2, sizeof( void * ) * 2>::type storage_atom;
 
       public:
-          static void * & functor_ptr( function_buffer       & buffer ) { return buffer.trivial_heap_obj.ptr; }
+          static void * & functor_ptr( function_buffer       & buffer ) { __assume( buffer.trivial_heap_obj.ptr ); return buffer.trivial_heap_obj.ptr; }
           static void *   functor_ptr( function_buffer const & buffer ) { return functor_ptr( const_cast<function_buffer &>( buffer ) ); }
 
           template <typename Functor>
@@ -573,15 +571,13 @@ namespace boost {
           static void BOOST_FUNCTION_FASTCALL move( function_buffer & in_buffer, function_buffer & out_buffer )
           {
               out_buffer.trivial_heap_obj = in_buffer.trivial_heap_obj;
-              //...probably unnecessary
-              in_buffer.trivial_heap_obj.ptr = 0;
+              //in_buffer.trivial_heap_obj.ptr = 0;
           }
 
           static void BOOST_FUNCTION_FASTCALL destroy( function_buffer & buffer )
           {
               delete [] functor_ptr( buffer );
-              //...probably unnecessary
-              functor_ptr( buffer ) = 0;
+              //functor_ptr( buffer ) = 0;
           }
       };
 
@@ -656,8 +652,7 @@ namespace boost {
           static void destroy( function_buffer& buffer )
           {
               checked_delete( functor_ptr( buffer ) );
-              //...probably unnecessary
-              functor_ptr( buffer ) = 0;
+              //functor_ptr( buffer ) = 0;
           }
       };
 
