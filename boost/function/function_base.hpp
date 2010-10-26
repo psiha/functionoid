@@ -11,6 +11,9 @@
 #ifndef BOOST_FUNCTION_BASE_HEADER
 #define BOOST_FUNCTION_BASE_HEADER
 
+#include "detail/platform_specifics.hpp"
+#include "detail/safe_bool.hpp"
+
 #include <stdexcept>
 #include <stddef.h>
 #include <string>
@@ -61,8 +64,6 @@
 #include <boost/function_equal.hpp>
 #include <boost/function/function_fwd.hpp>
 
-#include <boost/function/detail/safe_bool.hpp>
-
 #if defined(BOOST_MSVC)
 #   pragma warning( push )
 #   pragma warning( disable : 4127 ) // "conditional expression is constant"
@@ -81,12 +82,6 @@
 #  define BOOST_FUNCTION_STD_NS std
 #endif
 #endif // BOOST_NO_TYPEID
-
-#if defined( BOOST_MSVC ) || defined( __GNUC__ ) || defined( __BORLANDC__ )
-    #define BOOST_FUNCTION_FASTCALL __fastcall
-#else
-    #define BOOST_FUNCTION_FASTCALL
-#endif
 
 
 // Borrowed from Boost.Python library: determines the cases where we
@@ -124,6 +119,24 @@
                        Type>::type
 #endif
 
+
+#if defined( __clang__ ) || ( defined( __GNUC__ ) && ( ( ( __GNUC__ * 10 ) + __GNUC_MINOR__ ) < 45 ) )
+    #define BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT BOOST_ASSERT
+#else
+    #define BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT BOOST_STATIC_ASSERT
+#endif // __clang__
+
+#if defined( BOOST_MSVC ) || defined( __clang__ ) || ( defined( __GNUC__ ) && ( ( ( __GNUC__ * 10 ) + __GNUC_MINOR__ ) >= 45 ) )
+    #define BF_VT_REF   &
+    #define BF_VT_DEREF *
+    #define BF_FASTCALL_WORKAROUND BF_FASTCALL
+#else
+    #define BF_VT_REF   * const
+    #define BF_VT_DEREF
+    #define BF_FASTCALL_WORKAROUND // GCC 4.2.1 just doesn't seem happy with decorated function pointers...
+#endif
+
+
 namespace boost {
   namespace detail {
     namespace function {
@@ -148,7 +161,10 @@ namespace boost {
     #ifndef BOOST_FUNCTION_NO_RTTI
       // For transferring stored function object type information back to the
       // interface side.
-      class typed_functor : noncopyable
+      class typed_functor
+      #ifndef __GNUC__ //...zzz...GCC and Clang have serious RVO problems...
+          : noncopyable
+      #endif // __GNUC__
       {
       public:
           template <typename Functor>
@@ -314,7 +330,7 @@ namespace boost {
           :
           public mpl::bool_
           <
-            #ifdef BOOST_MSVC
+            #ifdef _MSC_VER
               !is_class      <T>::value &&
               !is_fundamental<T>::value &&
               ( sizeof( T ) == sizeof( void (*) (void) ) )
@@ -361,6 +377,8 @@ namespace boost {
       };
 */
 
+      typedef boost::aligned_storage<sizeof( void * ) * 2, sizeof( void * ) * 2>::type trivial_heap_storage_atom;
+
       template<typename Functor>
       struct functor_traits
       {
@@ -396,7 +414,7 @@ namespace boost {
           BOOST_STATIC_CONSTANT
           (bool,
           hasDefaultAlignement =
-            alignment_of<Functor>::value == alignment_of<manager_trivial_heap::storage_atom>::value);
+            alignment_of<Functor>::value == alignment_of<trivial_heap_storage_atom>::value);
       };
 
 
@@ -412,28 +430,24 @@ namespace boost {
       {
       #ifndef BOOST_FUNCTION_NO_RTTI
       private:
-          template <bool is_ref_wrapper, bool is_member_pointer>
-          static ActualFunctor * actual_functor_ptr( StoredFunctor * storedFunctor );
-
-          template <>
-          static ActualFunctor * actual_functor_ptr<true, false>( StoredFunctor * pStoredFunctor )
+          static ActualFunctor * actual_functor_ptr( StoredFunctor * pStoredFunctor, mpl::true_ /*is_ref_wrapper*/, mpl::false_ /*is_member_pointer*/ )
           {
               // needed when StoredFunctor is a static reference
               ignore_unused_variable_warning( pStoredFunctor );
               return pStoredFunctor->get_pointer();
           }
-          template <>
-          static ActualFunctor * actual_functor_ptr<false, true>( StoredFunctor * pStoredFunctor )
+
+          static ActualFunctor * actual_functor_ptr( StoredFunctor * pStoredFunctor, mpl::false_ /*is_ref_wrapper*/, mpl::true_ /*is_member_pointer*/ )
           {
               BOOST_STATIC_ASSERT( sizeof( StoredFunctor ) == sizeof( ActualFunctor ) );
               return static_cast<ActualFunctor *>( static_cast<void *>( pStoredFunctor ) );
           }
-          template <>
-          static ActualFunctor * actual_functor_ptr<false, false>( StoredFunctor * pStoredFunctor )
+
+          static ActualFunctor * actual_functor_ptr( StoredFunctor * pStoredFunctor, mpl::false_ /*is_ref_wrapper*/, mpl::false_ /*is_member_pointer*/ )
           {
               BOOST_STATIC_ASSERT
               ((
-                  ( is_same<remove_cv<ActualFunctor>::type, StoredFunctor>::value ) ||
+                  ( is_same<typename remove_cv<ActualFunctor>::type, StoredFunctor>::value ) ||
                   (
                     is_msvc_exception_specified_function_pointer<ActualFunctor>::value &&
                     is_msvc_exception_specified_function_pointer<StoredFunctor>::value &&
@@ -443,10 +457,15 @@ namespace boost {
               return pStoredFunctor;
           }
       public:
-          static typed_functor BOOST_FUNCTION_FASTCALL get_typed_functor( function_buffer const & buffer )
+          // See the related comment in the vtable struct definition.
+          #ifdef __GNUC__
+            static typed_functor             get_typed_functor( function_buffer const & buffer )
+          #else
+            static typed_functor BF_FASTCALL get_typed_functor( function_buffer const & buffer )
+          #endif
           {
               StoredFunctor * const pStoredFunctor( FunctorManager::functor_ptr( const_cast<function_buffer &>( buffer ) ) );
-              ActualFunctor * const pActualFunctor( actual_functor_ptr<is_reference_wrapper<StoredFunctor>::value, is_member_pointer<ActualFunctor>::value>( pStoredFunctor ) );
+              ActualFunctor * const pActualFunctor( actual_functor_ptr( pStoredFunctor, is_reference_wrapper<StoredFunctor>(), is_member_pointer<ActualFunctor>() ) );
               return typed_functor( *pActualFunctor );
           }
       #endif // BOOST_FUNCTION_NO_RTTI
@@ -458,22 +477,22 @@ namespace boost {
       <
           class FunctorManager,
           typename ActualFunctor,
-          typename StoredFunctor = FunctorManager::Functor
+          typename StoredFunctor = typename FunctorManager::Functor
       >
       struct typed_manager
           :
           public FunctorManager,
-          public functor_type_info<ActualFunctor, StoredFunctor, typed_manager<FunctorManager, ActualFunctor, StoredFunctor>>
+          public functor_type_info<ActualFunctor, StoredFunctor, typed_manager<FunctorManager, ActualFunctor, StoredFunctor> >
       {
           typedef StoredFunctor Functor;
-          static StoredFunctor * functor_ptr( function_buffer & buffer ) { return static_cast<StoredFunctor *>( FunctorManager::functor_ptr( buffer ) ); }
+          static StoredFunctor * functor_ptr( function_buffer & buffer ) { return static_cast<StoredFunctor *>( static_cast<void *>( FunctorManager::functor_ptr( buffer ) ) ); }
       };
 
       /// Manager for trivial objects that fit into sizeof( void * ).
       struct manager_ptr
       {
       public:
-          static void       *       * functor_ptr( function_buffer       & buffer ) { __assume( buffer.obj_ptr ); return &buffer.obj_ptr; }
+          static void       *       * functor_ptr( function_buffer       & buffer ) { BF_ASSUME( buffer.obj_ptr ); return &buffer.obj_ptr; }
           static void const * const * functor_ptr( function_buffer const & buffer ) { return functor_ptr( const_cast<function_buffer &>( buffer ) ); }
 
           template <typename Functor>
@@ -483,18 +502,18 @@ namespace boost {
               new ( functor_ptr( out_buffer ) ) Functor( functor );
           }
 
-          static void BOOST_FUNCTION_FASTCALL clone( function_buffer const & in_buffer, function_buffer & out_buffer )
+          static void BF_FASTCALL_WORKAROUND clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
               return assign( *functor_ptr( in_buffer ), out_buffer );
           }
 
-          static void BOOST_FUNCTION_FASTCALL move( function_buffer & in_buffer, function_buffer & out_buffer )
+          static void BF_FASTCALL_WORKAROUND move( function_buffer & in_buffer, function_buffer & out_buffer )
           {
               clone( in_buffer, out_buffer );
               destroy( in_buffer );
           }
 
-          static void BOOST_FUNCTION_FASTCALL destroy( function_buffer & buffer )
+          static void BF_FASTCALL_WORKAROUND destroy( function_buffer & /*buffer*/ )
           {
               //*functor_ptr( buffer ) = 0;
           }
@@ -509,7 +528,7 @@ namespace boost {
           template <typename Functor>
           static void assign( Functor const & functor, function_buffer & out_buffer )
           {
-              BOOST_STATIC_ASSERT
+              BOOST_ASSERT
               (
                 functor_traits<Functor>::allowsPODOptimization &&
                 functor_traits<Functor>::allowsSmallObjectOptimization
@@ -517,18 +536,18 @@ namespace boost {
               new ( functor_ptr( out_buffer ) ) Functor( functor );
           }
 
-          static void BOOST_FUNCTION_FASTCALL clone( function_buffer const & in_buffer, function_buffer & out_buffer )
+          static void BF_FASTCALL_WORKAROUND clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
               return assign( in_buffer, out_buffer );
           }
 
-          static void BOOST_FUNCTION_FASTCALL move( function_buffer & in_buffer, function_buffer & out_buffer )
+          static void BF_FASTCALL_WORKAROUND move( function_buffer & in_buffer, function_buffer & out_buffer )
           {
               clone( in_buffer, out_buffer );
               destroy( in_buffer );
           }
 
-          static void BOOST_FUNCTION_FASTCALL destroy( function_buffer & buffer )
+          static void BF_FASTCALL_WORKAROUND destroy( function_buffer & /*buffer*/ )
           {
               //std::memset( &buffer, 0, sizeof( buffer ) );
           }
@@ -538,16 +557,16 @@ namespace boost {
       struct manager_trivial_heap
       {
       public:
-          typedef boost::aligned_storage<sizeof( void * ) * 2, sizeof( void * ) * 2>::type storage_atom;
+          typedef trivial_heap_storage_atom storage_atom;
 
       public:
-          static void * & functor_ptr( function_buffer       & buffer ) { __assume( buffer.trivial_heap_obj.ptr ); return buffer.trivial_heap_obj.ptr; }
+          static void * & functor_ptr( function_buffer       & buffer ) { BF_ASSUME( buffer.trivial_heap_obj.ptr ); return buffer.trivial_heap_obj.ptr; }
           static void *   functor_ptr( function_buffer const & buffer ) { return functor_ptr( const_cast<function_buffer &>( buffer ) ); }
 
           template <typename Functor>
           static void assign( Functor const & functor, function_buffer & out_buffer )
           {
-              BOOST_STATIC_ASSERT
+              BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT
               (
                 functor_traits<Functor>::allowsPODOptimization &&
                 functor_traits<Functor>::hasDefaultAlignement
@@ -560,7 +579,7 @@ namespace boost {
               return clone( in_buffer, out_buffer );
           }
 
-          static void BOOST_FUNCTION_FASTCALL clone( function_buffer const & in_buffer, function_buffer & out_buffer )
+          static void BF_FASTCALL_WORKAROUND clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
               std::size_t const storage_array_size( in_buffer.trivial_heap_obj.size );
               out_buffer.trivial_heap_obj.ptr  = new storage_atom[ storage_array_size ];
@@ -568,25 +587,25 @@ namespace boost {
               std::memcpy( functor_ptr( out_buffer ), functor_ptr( in_buffer ), storage_array_size * sizeof( storage_atom ) );
           }
 
-          static void BOOST_FUNCTION_FASTCALL move( function_buffer & in_buffer, function_buffer & out_buffer )
+          static void BF_FASTCALL_WORKAROUND move( function_buffer & in_buffer, function_buffer & out_buffer )
           {
               out_buffer.trivial_heap_obj = in_buffer.trivial_heap_obj;
               //in_buffer.trivial_heap_obj.ptr = 0;
           }
 
-          static void BOOST_FUNCTION_FASTCALL destroy( function_buffer & buffer )
+          static void BF_FASTCALL_WORKAROUND destroy( function_buffer & buffer )
           {
-              delete [] functor_ptr( buffer );
+              delete [] static_cast<storage_atom *>( functor_ptr( buffer ) );
               //functor_ptr( buffer ) = 0;
           }
       };
 
       /// Manager for non-trivial objects that can live in a function_buffer.
-      template <typename Functor>
+      template <typename FunctorParam>
       struct manager_small
       {
       public:
-          typedef Functor Functor;
+          typedef FunctorParam Functor;
 
           static Functor       * functor_ptr( function_buffer       & buffer ) { return static_cast<Functor *>( manager_trivial_small::functor_ptr( buffer ) ); }
           static Functor const * functor_ptr( function_buffer const & buffer ) { return functor_ptr( const_cast<function_buffer &>( buffer ) ); }
@@ -596,20 +615,20 @@ namespace boost {
               new ( functor_ptr( out_buffer ) ) Functor( functor );
           }
 
-          static void BOOST_FUNCTION_FASTCALL clone( function_buffer const & in_buffer, function_buffer & out_buffer )
+          static void BF_FASTCALL_WORKAROUND clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
               Functor const & in_functor( *functor_ptr( in_buffer ) );
               return assign( in_functor, out_buffer );
           }
 
-          static void BOOST_FUNCTION_FASTCALL move( function_buffer & in_buffer, function_buffer & out_buffer )
+          static void BF_FASTCALL_WORKAROUND move( function_buffer & in_buffer, function_buffer & out_buffer )
           {
               // ...use swap here?
               clone( in_buffer, out_buffer );
               destroy( in_buffer );
           }
 
-          static void BOOST_FUNCTION_FASTCALL destroy( function_buffer & buffer )
+          static void BF_FASTCALL_WORKAROUND destroy( function_buffer & buffer )
           {
               functor_ptr( buffer )->~Functor();
           }
@@ -617,15 +636,21 @@ namespace boost {
 
       ///  Fully generic manager for non-trivial objects that cannot live/fit in
       /// a function_buffer.
-      template <typename Functor>
+      template <typename FunctorParam>
       struct manager_generic
       {
       public:
-          typedef Functor Functor;
+          typedef FunctorParam Functor;
 
           static Functor * & functor_ptr( function_buffer & buffer )
           {
-              return static_cast<Functor * &>( manager_trivial_heap::functor_ptr( buffer ) );
+              return *static_cast<Functor * *>
+              (
+                  static_cast<void *>
+                  (
+                      &manager_trivial_heap::functor_ptr( buffer )
+                  )
+              );
           }
 
           static Functor * functor_ptr( function_buffer const & buffer )
@@ -913,9 +938,7 @@ namespace boost {
 
         void clone  ( function_buffer const & in_buffer, function_buffer & out_buffer ) const { do_clone( in_buffer, out_buffer ); }
         void move   ( function_buffer       & in_buffer, function_buffer & out_buffer ) const { do_move ( in_buffer, out_buffer ); }
-        #ifdef BOOST_MSVC
-          __declspec( nothrow )
-        #endif
+        BF_NOTHROW
         void destroy( function_buffer       & buffer                                  ) const { do_destroy( buffer );              }
 
         // The possibly-decorated-invoker-wrapper is not used here because MSVC
@@ -926,20 +949,24 @@ namespace boost {
       public: // "Private but not private" to enable aggregate-style initialization.
         invoker_placeholder_type const void_invoker;
 
-        void (BOOST_FUNCTION_FASTCALL & do_clone   )( function_buffer const & in_buffer, function_buffer & out_buffer );
-        void (BOOST_FUNCTION_FASTCALL & do_move    )( function_buffer       & in_buffer, function_buffer & out_buffer );
-        void (BOOST_FUNCTION_FASTCALL & do_destroy )( function_buffer       & buffer                                  );
+        void (BF_FASTCALL_WORKAROUND BF_VT_REF do_clone   )( function_buffer const & in_buffer, function_buffer & out_buffer );
+        void (BF_FASTCALL_WORKAROUND BF_VT_REF do_move    )( function_buffer       & in_buffer, function_buffer & out_buffer );
+        void (BF_FASTCALL_WORKAROUND BF_VT_REF do_destroy )( function_buffer       & buffer                                  );
 
       #ifndef BOOST_FUNCTION_NO_RTTI
+      public:
         // Because of the MSVC issue described above we mark the
         // get_typed_functor function as nothrow like this, explicitly (because
         // MSVC does not properly support exception specifications this is not a
         // pessimization...it is equivalent to __declspec( nothrow )).
-        typed_functor (BOOST_FUNCTION_FASTCALL & get_typed_functor)( function_buffer const & )
-        #ifdef BOOST_MSVC
-            throw()
+        // OTOH, All GCCs and Clang break down here if they find the fastcall
+        // attribute so they get it undecorated...
+        #ifdef _MSC_VER
+            typed_functor ( BF_FASTCALL BF_VT_REF get_typed_functor )( function_buffer const & ) throw();
+        #else
+            typed_functor (             BF_VT_REF get_typed_functor )( function_buffer const & );
         #endif // BOOST_MSVC
-        ;
+
       #endif // BOOST_FUNCTION_NO_RTTI
 
 
@@ -985,11 +1012,11 @@ namespace boost {
       vtable const vtable_holder<Invoker, Manager>::stored_vtable =
       {
           vtable_holder<Invoker, Manager>::get_invoker_pointer( thiscall_optimization_available() ),
-          &Manager::clone,
-          &Manager::move,
-          &Manager::destroy
+          BF_VT_DEREF &Manager::clone,
+          BF_VT_DEREF &Manager::move,
+          BF_VT_DEREF &Manager::destroy
         #ifndef BOOST_FUNCTION_NO_RTTI
-          ,&Manager::get_typed_functor
+          ,BF_VT_DEREF &Manager::get_typed_functor
         #endif // BOOST_FUNCTION_NO_RTTI
       };
     } // end namespace function
@@ -1033,11 +1060,11 @@ private: // Private helper guard classes.
           using namespace detail::function;
           if ( clear )
           {
-              assert( pFunction_ );
-              typedef functor_traits<EmptyHandler> empty_handler_traits;
-              typedef get_functor_manager<EmptyHandler>::type empty_handler_manager;
+              BOOST_ASSERT( pFunction_ );
+              typedef          functor_traits     <EmptyHandler>       empty_handler_traits ;
+              typedef typename get_functor_manager<EmptyHandler>::type empty_handler_manager;
               // remove completely or replace with a simple is_stateless<>?
-              BOOST_STATIC_ASSERT
+              BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT
               (
                 empty_handler_traits::allowsPODOptimization &&
                 empty_handler_traits::allowsSmallObjectOptimization
@@ -1061,22 +1088,7 @@ public:
     ~function_base() { destroy(); }
 
   template <class EmptyHandler>
-  void swap( function_base & other, detail::function::vtable const & empty_handler_vtable )
-  {
-    if (&other == this)
-      return;
-
-    function_base tmp( empty_handler_vtable );
-
-    safe_mover<EmptyHandler> my_restorer   ( *this, tmp   );
-
-    safe_mover<EmptyHandler> other_restorer( other, *this );
-
-    safe_mover_base::move( tmp, other, empty_handler_vtable );
-
-    my_restorer   .cancel();
-    other_restorer.cancel();
-  }
+  void swap( function_base & other, detail::function::vtable const & empty_handler_vtable );
 
 #ifndef BOOST_FUNCTION_NO_RTTI
 
@@ -1141,29 +1153,24 @@ public:
 public: // should be protected, but GCC 2.95.3 will fail to allow access
   detail::function::vtable const & get_vtable() const
   {
-      assert( pVTable );
-      #ifdef BOOST_MSVC
-          __assume( pVTable );
-      #endif // BOOST_MSVC
+      BF_ASSUME( pVTable );
       return *pVTable;
   }
 
 protected:
   template <class EmptyHandler>
-  #ifdef BOOST_MSVC
-    __declspec( nothrow )
-  #endif
+  BF_NOTHROW
   void clear( detail::function::vtable const & empty_handler_vtable )
   {
       //  If we hold to the is_stateless<EmptyHandler> requirement a full assign
       // is not necessary here but a simple
       // this->pVTable = &empty_handler_vtable...
-      EmptyHandler const emptyHandler;
+      EmptyHandler /*const*/ emptyHandler;
       assign<false, EmptyHandler>( emptyHandler, empty_handler_vtable, empty_handler_vtable );
   }
 
 private: // Assignment from another boost function helpers.
-  __declspec( noinline )
+  BF_NOINLINE
   void assign_direct( function_base const & source )
   {
       source.pVTable->clone( source.functor, this->functor );
@@ -1171,7 +1178,7 @@ private: // Assignment from another boost function helpers.
   }
 
   template <class EmptyHandler>
-  __declspec( noinline )
+  BF_NOINLINE
   void assign_guarded( function_base const & source, detail::function::vtable const & empty_handler_vtable )
   {
       this->destroy();
@@ -1183,7 +1190,7 @@ private: // Assignment from another boost function helpers.
 protected:
   // Assignment from another boost function.
   template<bool direct, typename EmptyHandler, typename FunctionObj>
-  typename enable_if<is_base_of<function_base, FunctionObj>>::type
+  typename enable_if<is_base_of<function_base, FunctionObj> >::type
   assign
   (
     FunctionObj const & f,
@@ -1207,56 +1214,16 @@ protected:
 
   // General actual assignment.
   template<bool direct, typename EmptyHandler, typename FunctionObj>
-  typename disable_if<is_base_of<function_base, FunctionObj>>::type
+  typename disable_if<is_base_of<function_base, FunctionObj> >::type
   assign
   (
     FunctionObj const & f,
     detail::function::vtable const & functor_vtable,
     detail::function::vtable const & empty_handler_vtable
-  )
-  {
-      using namespace detail::function;
-
-      if ( has_empty_target( boost::addressof( f ) ) )
-          this->clear<EmptyHandler>( empty_handler_vtable );
-      else
-      if ( direct )
-      {
-          assert( this->pVTable == &empty_handler_vtable );
-          typedef get_functor_manager<FunctionObj>::type functor_manager;
-          functor_manager::assign( f, this->functor );
-          this->pVTable = &functor_vtable;
-          return;
-      }
-      else
-      {
-          // This can/should be rewritten because the small-object-optimization
-          // condition is too strict (requires a trivial destructor which is not
-          // needed for a no fail assignment).
-          bool const has_no_fail_assignement
-          (
-            functor_traits<FunctionObj>::allowsSmallObjectOptimization &&
-            (
-              has_nothrow_copy_constructor<FunctionObj>::value ||
-              has_trivial_copy_constructor<FunctionObj>::value ||
-              is_msvc_exception_specified_function_pointer<FunctionObj>::value
-            )
-          );
-
-          actual_assign<EmptyHandler>
-          (
-             f,
-             functor_vtable,
-             empty_handler_vtable,
-             mpl::bool_<has_no_fail_assignement>()
-          );
-      }
-  }
+  );
 
   template<typename EmptyHandler, typename FunctionObj>
-  #ifdef BOOST_MSVC
-    __declspec( nothrow )
-  #endif
+  BF_NOTHROW
   void actual_assign
   (
     FunctionObj const & f,
@@ -1265,7 +1232,7 @@ protected:
     mpl::true_ /*can use direct assign*/
   )
   {
-      typedef detail::function::get_functor_manager<FunctionObj>::type functor_manager;
+      typedef typename detail::function::get_functor_manager<FunctionObj>::type functor_manager;
       this->destroy();
       functor_manager::assign( f, this->functor );
       this->pVTable = &functor_vtable;
@@ -1283,7 +1250,7 @@ protected:
       // This most generic case needs to be reworked [currently uses redundant
       // copying (generic one, through function pointers) and does not use all
       // the type information it can...]...
-      typedef detail::function::get_functor_manager<FunctionObj>::type functor_manager;
+      typedef typename detail::function::get_functor_manager<FunctionObj>::type functor_manager;
       function_base tmp( empty_handler_vtable );
       functor_manager::assign( f, tmp.functor );
       tmp.pVTable = &functor_vtable;
@@ -1356,6 +1323,26 @@ public:
     }
 };
 
+
+template <class EmptyHandler>
+void function_base::swap( function_base & other, detail::function::vtable const & empty_handler_vtable )
+{
+    if (&other == this)
+        return;
+
+    function_base tmp( empty_handler_vtable );
+
+    safe_mover<EmptyHandler> my_restorer   ( *this, tmp   );
+
+    safe_mover<EmptyHandler> other_restorer( other, *this );
+
+    safe_mover_base::move( tmp, other, empty_handler_vtable );
+
+    my_restorer   .cancel();
+    other_restorer.cancel();
+}
+
+
 ///  The bad_function_call exception class is thrown when an empty
 /// boost::function object is invoked that uses the throw_on_empty empty
 /// handler.
@@ -1370,8 +1357,10 @@ class throw_on_empty
 private:
     #ifdef BOOST_MSVC
         __declspec( noinline noreturn )
+    #else
+        BF_NOINLINE
     #endif // BOOST_MSVC
-    void throw_bad_call() const
+    static void throw_bad_call()
     {
         boost::throw_exception( bad_function_call() );
     }
@@ -1381,7 +1370,7 @@ public:
     #ifdef BOOST_MSVC
         __declspec( noreturn )
     #endif // BOOST_MSVC
-    result_type operator()() const
+    static result_type handle_empty_invoke()
     {
         throw_bad_call();
         #ifndef BOOST_MSVC
@@ -1394,7 +1383,7 @@ class assert_on_empty
 {
 public:
     template <class result_type>
-    result_type operator()() const
+    static result_type handle_empty_invoke()
     {
         BOOST_ASSERT( !"Call to empty boost::function!" );
         return result_type();
@@ -1405,16 +1394,16 @@ class nop_on_empty
 {
 public:
     template <class result_type>
-    result_type operator()() const { return result_type(); }
+    static result_type handle_empty_invoke() { return result_type(); }
 };
 
 
-#define BOOST_FUNCTION_ENABLE_IF_FUNCTION                     \
-    template <class Function>                                 \
-    typename enable_if                                        \
-             <                                                \
-                is_base_of<::boost::function_base, Function>, \
-                bool                                          \
+#define BOOST_FUNCTION_ENABLE_IF_FUNCTION                   \
+    template <class Function>                               \
+    typename enable_if                                      \
+             <                                              \
+                is_base_of<boost::function_base, Function>, \
+                bool                                        \
              >::type
 
 #ifndef BOOST_NO_SFINAE
@@ -1611,12 +1600,63 @@ namespace detail {
     }
   } // end namespace function
 } // end namespace detail
+
+//...zzz...here because of has_empty_target()...GCC & Clang are not lazy enough
+template<bool direct, typename EmptyHandler, typename FunctionObj>
+typename disable_if<is_base_of<function_base, FunctionObj> >::type
+function_base::assign
+(
+    FunctionObj const & f,
+    detail::function::vtable const & functor_vtable,
+    detail::function::vtable const & empty_handler_vtable
+)
+{
+    using namespace detail::function;
+
+    if ( has_empty_target( boost::addressof( f ) ) )
+        this->clear<EmptyHandler>( empty_handler_vtable );
+    else
+    if ( direct )
+    {
+        BOOST_ASSERT( this->pVTable == &empty_handler_vtable );
+        typedef typename get_functor_manager<FunctionObj>::type functor_manager;
+        functor_manager::assign( f, this->functor );
+        this->pVTable = &functor_vtable;
+        return;
+    }
+    else
+    {
+        // This can/should be rewritten because the small-object-optimization
+        // condition is too strict (requires a trivial destructor which is not
+        // needed for a no fail assignment).
+
+        actual_assign<EmptyHandler>
+        (
+            f,
+            functor_vtable,
+            empty_handler_vtable,
+            mpl::bool_
+            <
+                //has_no_fail_assignement:
+                functor_traits<FunctionObj>::allowsSmallObjectOptimization &&
+                (
+                    has_nothrow_copy_constructor<FunctionObj>::value ||
+                    has_trivial_copy_constructor<FunctionObj>::value ||
+                    is_msvc_exception_specified_function_pointer<FunctionObj>::value
+                )
+            >()
+        );
+    }
+}
+
 } // end namespace boost
 
 #undef BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL
 #undef BOOST_FUNCTION_COMPARE_TYPE_ID
 #undef BOOST_FUNCTION_ENABLE_IF_FUNCTION
-#undef BOOST_FUNCTION_FASTCALL
+#undef BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT
+#undef BF_VT_REF
+#undef BF_VT_DEREF
 
 // ...to be moved 'somewhere else'...
 namespace boost {
@@ -1642,7 +1682,7 @@ namespace detail {
 template
 <
     typename T,
-    typename detail::get_non_type_template_parameter_type<T>::type t
+    typename detail::get_non_type_template_parameter_type<T>::type static_instance
 >
 class static_reference_wrapper
 {
@@ -1656,15 +1696,15 @@ private:
 public:
     operator type () const { return get(); }
 
-    static type get() { return t; }
+    static type get() { return static_instance; }
 
     static T const * get_pointer()
     {
         if ( is_reference<type>::value )
-            return get_pointer( t );
+            return get_pointer( static_instance );
         else
         {
-            static add_const<type>::type t_( t );
+            static typename add_const<type>::type t_( static_instance );
             return get_pointer( t_ );
         }
     }
@@ -1673,9 +1713,9 @@ public:
 template
 <
     typename T,
-    typename detail::get_non_type_template_parameter_type<T>::type t
+    typename detail::get_non_type_template_parameter_type<T>::type static_instance
 >
-class is_reference_wrapper<static_reference_wrapper<T, t>>
+class is_reference_wrapper<static_reference_wrapper<T, static_instance> >
     : public mpl::true_
 {
 };
@@ -1689,9 +1729,9 @@ class is_static_reference_wrapper
 template
 <
     typename T,
-    typename detail::get_non_type_template_parameter_type<T>::type t
+    typename detail::get_non_type_template_parameter_type<T>::type static_instance
 >
-class is_static_reference_wrapper<static_reference_wrapper<T, t>>
+class is_static_reference_wrapper<static_reference_wrapper<T, static_instance> >
     : public mpl::true_
 {
 };
@@ -1725,7 +1765,7 @@ detail::static_reference_maker<T const> sref( T const & t )
     return detail::static_reference_maker<T const>( t );
 }
 
-#define BOOST_SREF( object ) boost::sref( object ).sref<object>()
+#define BOOST_SREF( object ) boost::sref( object ). BOOST_NESTED_TEMPLATE sref<object>()
 
 } // end namespace boost
 
