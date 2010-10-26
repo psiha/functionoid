@@ -195,8 +195,6 @@ namespace boost {
                 user_specified_empty_handler
             >::type base_empty_handler;
 
-    BOOST_STATIC_ASSERT( is_stateless<base_empty_handler>::value );
-
   // The nothrow policy and runtime throw detection functionality works only in
   // release mode/with optimizations on. It should also work in debug for plain
   // function pointers with compilers that properly implement the 'exception
@@ -225,7 +223,7 @@ namespace boost {
     {
         R operator()( BOOST_FUNCTION_PARMS ) const
         {
-            return base_empty_handler::operator()<R>();
+            return base_empty_handler:: BOOST_NESTED_TEMPLATE handle_empty_invoke<R>();
         }
     };
 
@@ -235,7 +233,10 @@ namespace boost {
 
   public: // Public function interface.
 
-    BOOST_FUNCTION_FUNCTION() : function_base( empty_handler_vtable() ) {}
+    BOOST_FUNCTION_FUNCTION() : function_base( empty_handler_vtable() )
+    {
+        BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT( is_stateless<base_empty_handler>::value );
+    }
 
     // MSVC chokes if the following two constructors are collapsed into
     // one with a default parameter.
@@ -301,7 +302,7 @@ namespace boost {
     template <signature_type * f>
     void assign()
     {
-        this->assign( detail::static_reference_maker<signature_type *>::sref<f>() );
+        this->assign( detail::static_reference_maker<signature_type *>:: BOOST_NESTED_TEMPLATE sref<f>() );
     }
 
     template <class AClass, R (AClass::*mmf)(BOOST_FUNCTION_TEMPLATE_ARGS)>
@@ -349,7 +350,7 @@ namespace boost {
     // over"...
     BOOST_FUNCTION_FUNCTION & operator=( BOOST_FUNCTION_FUNCTION const & f )
     {
-        this->assign( f )
+        this->assign( f );
         return *this;
     }
 
@@ -428,12 +429,12 @@ private:
     template <class F>
     static bool is_nothrow()
     {
-        typedef bool ( throw_test_signature ) ( unwrap_reference<F>::type & BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_ARGS );
+        typedef bool ( throw_test_signature ) ( typename unwrap_reference<F>::type & BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_ARGS );
         return detail::function::is_nothrow_helper
                 <
                     throw_test_signature,
-                    &nothrow_test<unwrap_reference<F>::type>,
-                    &throw_test  <unwrap_reference<F>::type>
+		            &BOOST_FUNCTION_FUNCTION:: BOOST_NESTED_TEMPLATE nothrow_test<typename unwrap_reference<F>::type>,
+		            &BOOST_FUNCTION_FUNCTION:: BOOST_NESTED_TEMPLATE throw_test  <typename unwrap_reference<F>::type>
 				>::is_nothrow;
 
 		#if defined(BOOST_MSVC) && BOOST_MSVC == 1400
@@ -469,13 +470,13 @@ private:
     result_type do_invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::true_ /*this call*/ ) const
     {
         typedef result_type (detail::function::function_buffer::* invoker_type)(BOOST_FUNCTION_TEMPLATE_ARGS);
-        return (functor.*(get_vtable().invoker<invoker_type>()))(BOOST_FUNCTION_ARGS);
+        return (functor.*(get_vtable(). BOOST_NESTED_TEMPLATE invoker<invoker_type>()))(BOOST_FUNCTION_ARGS);
     }
 
     result_type do_invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::false_ /*free call*/ ) const
     {
         typedef result_type (* invoker_type)( BOOST_FUNCTION_TEMPLATE_ARGS BOOST_FUNCTION_COMMA detail::function::function_buffer & );
-        return get_vtable().invoker<invoker_type>()( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA functor );
+        return get_vtable(). BOOST_NESTED_TEMPLATE invoker<invoker_type>()( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA functor );
     }
 
 
@@ -605,14 +606,14 @@ private:
             // assign) when the nothrow policy is specified...this should be
             // fixed...
             BOOST_ASSERT( is_nothrow<my_empty_handler>() );
-            base_empty_handler const emptyHandler;
+            base_empty_handler /*const*/ emptyHandler;
             function_base::assign<direct, base_empty_handler>
             (
                 emptyHandler,
                 empty_handler_vtable(),
                 empty_handler_vtable()
             );
-            emptyHandler.operator()<R>();
+            emptyHandler. BOOST_NESTED_TEMPLATE handle_empty_invoke<R>();
         }
         else
             function_base::assign<direct, base_empty_handler>
@@ -736,7 +737,7 @@ public:
 #endif
   operator=(Functor const & f)
   {
-    this->assign<Functor>( f );
+    this-> BOOST_NESTED_TEMPLATE assign<Functor>( f );
     return *this;
   }
 
