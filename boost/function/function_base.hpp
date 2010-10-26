@@ -528,7 +528,7 @@ namespace boost {
           template <typename Functor>
           static void assign( Functor const & functor, function_buffer & out_buffer )
           {
-              BOOST_ASSERT
+              BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT
               (
                 functor_traits<Functor>::allowsPODOptimization &&
                 functor_traits<Functor>::allowsSmallObjectOptimization
@@ -1654,7 +1654,7 @@ function_base::assign
 #undef BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL
 #undef BOOST_FUNCTION_COMPARE_TYPE_ID
 #undef BOOST_FUNCTION_ENABLE_IF_FUNCTION
-#undef BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT
+//...zzz...required in function_template.hpp #undef BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT
 #undef BF_VT_REF
 #undef BF_VT_DEREF
 
