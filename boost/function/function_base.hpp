@@ -682,9 +682,9 @@ namespace boost {
           typedef FunctorParam   Functor          ;
           typedef AllocatorParam OriginalAllocator;
 
-          typedef          functor_and_allocator<Functor, OriginalAllocator>                              functor_and_allocator_t;
-          typedef typename OriginalAllocator:: BOOST_NESTED_TEMPLATE rebind<functor_and_allocator>::other wrapper_allocator_t    ;
-          typedef typename OriginalAllocator:: BOOST_NESTED_TEMPLATE rebind<OriginalAllocator    >::other allocator_allocator_t  ;
+          typedef          functor_and_allocator<Functor, OriginalAllocator>                                functor_and_allocator_t;
+          typedef typename OriginalAllocator:: BOOST_NESTED_TEMPLATE rebind<functor_and_allocator_t>::other wrapper_allocator_t    ;
+          typedef typename OriginalAllocator:: BOOST_NESTED_TEMPLATE rebind<OriginalAllocator      >::other allocator_allocator_t  ;
 
           static functor_and_allocator_t * & functor_ptr( function_buffer & buffer )
           {
