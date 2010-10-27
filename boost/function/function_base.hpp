@@ -141,6 +141,46 @@ namespace boost {
   namespace detail {
     namespace function {
 
+        template <typename T>
+        class fallocator
+        {
+        public:
+            typedef T value_type;
+
+            typedef value_type       * pointer        ;
+            typedef value_type       & reference      ;
+            typedef value_type const * const_pointer  ;
+            typedef value_type const & const_reference;
+
+            typedef std::size_t    size_type      ;
+            typedef std::ptrdiff_t difference_type;
+
+            template <class Other>
+            struct rebind { typedef fallocator<Other> other; };
+
+            fallocator() {}
+
+            template <class Other>
+            fallocator( fallocator<Other> const & ) {}
+
+            static pointer       address( reference       value ) { return addressof( value ); }
+            static const_pointer address( const_reference value ) { return addressof( value ); }
+
+            template <class Other>
+            fallocator<Other> & operator=( fallocator<Other> const & ) { return *this; }
+
+            pointer allocate  ( size_type const count, void const * /*p_hint*/ ) { return allocate( count ); }
+            pointer allocate  ( size_type const count                          ) { return ::operator new( count * sizeof( T ) ); }
+            void    deallocate( pointer   const ptr  , size_type const /*count*/ ) { ::operator delete( ptr ); }
+
+            void construct( pointer const ptr, T const & source ) { new ( ptr ) T( source ); }
+            void destroy  ( pointer const ptr                   ) { ptr->~T(); }
+
+            static size_type max_size() { return std::numeric_limits<size_type>::max() / sizeof( T ); }
+        };
+
+        typedef fallocator<void *> dummy_allocator;
+
         struct thiscall_optimization_available_helper
         {
             static void free_function () {}
@@ -359,23 +399,16 @@ namespace boost {
         typedef or_ref_tag type;
       };
 
-/*    ALLOCATOR SUPPORT TEMPORARILY COMMENTED OUT
-      template <typename F,typename A>
-      struct functor_wrapper: public F, public A
+
+      template <typename F, typename A>
+      struct functor_and_allocator : public F, public A
       {
-        functor_wrapper( F f, A a ):
-          F(f),
-          A(a)
-        {
-        }
-	
-	    functor_wrapper(const functor_wrapper& f) :
-              F(static_cast<const F&>(f)),
-              A(static_cast<const A&>(f))
-	    {
-	    }
+        functor_and_allocator( F const & f, A a ) : F( f ), A( a ) {}
+
+        F & functor  () { return *this; }
+        A & allocator() { return *this; }
       };
-*/
+
 
       typedef boost::aligned_storage<sizeof( void * ) * 2, sizeof( void * ) * 2>::type trivial_heap_storage_atom;
 
@@ -492,11 +525,11 @@ namespace boost {
       struct manager_ptr
       {
       public:
-          static void       *       * functor_ptr( function_buffer       & buffer ) { BF_ASSUME( buffer.obj_ptr ); return &buffer.obj_ptr; }
-          static void const * const * functor_ptr( function_buffer const & buffer ) { return functor_ptr( const_cast<function_buffer &>( buffer ) ); }
+          static void       *       * functor_ptr( function_buffer       & buffer ) { return &buffer.obj_ptr; }
+          static void const * const * functor_ptr( function_buffer const & buffer ) { BF_ASSUME( buffer.obj_ptr ); return functor_ptr( const_cast<function_buffer &>( buffer ) ); }
 
-          template <typename Functor>
-          static void assign( Functor const & functor, function_buffer & out_buffer )
+          template <typename Functor, typename Allocator>
+          static void assign( Functor const & functor, function_buffer & out_buffer, Allocator )
           {
               BOOST_STATIC_ASSERT( functor_traits<Functor>::allowsPtrObjectOptimization );
               new ( functor_ptr( out_buffer ) ) Functor( functor );
@@ -504,7 +537,7 @@ namespace boost {
 
           static void BF_FASTCALL_WORKAROUND clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
-              return assign( *functor_ptr( in_buffer ), out_buffer );
+              return assign( *functor_ptr( in_buffer ), out_buffer, dummy_allocator() );
           }
 
           static void BF_FASTCALL_WORKAROUND move( function_buffer & in_buffer, function_buffer & out_buffer )
@@ -525,8 +558,8 @@ namespace boost {
       public:
           static void * functor_ptr( function_buffer & buffer ) { return &buffer; }
 
-          template <typename Functor>
-          static void assign( Functor const & functor, function_buffer & out_buffer )
+          template <typename Functor, typename Allocator>
+          static void assign( Functor const & functor, function_buffer & out_buffer, Allocator )
           {
               BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT
               (
@@ -538,7 +571,7 @@ namespace boost {
 
           static void BF_FASTCALL_WORKAROUND clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
-              return assign( in_buffer, out_buffer );
+              return assign( in_buffer, out_buffer, dummy_allocator() );
           }
 
           static void BF_FASTCALL_WORKAROUND move( function_buffer & in_buffer, function_buffer & out_buffer )
@@ -553,38 +586,43 @@ namespace boost {
           }
       };
 
-      /// Manager for trivial objects that cannot live/fit in a function_buffer.
+      /// Manager for trivial objects that cannot live/fit in a function_buffer
+      /// and are used with 'empty' allocators.
+      template <typename Allocator>
       struct manager_trivial_heap
       {
       public:
-          typedef trivial_heap_storage_atom storage_atom;
+          typedef typename Allocator:: BOOST_NESTED_TEMPLATE rebind<unsigned char>::other trivial_allocator;
 
       public:
-          static void * & functor_ptr( function_buffer       & buffer ) { BF_ASSUME( buffer.trivial_heap_obj.ptr ); return buffer.trivial_heap_obj.ptr; }
-          static void *   functor_ptr( function_buffer const & buffer ) { return functor_ptr( const_cast<function_buffer &>( buffer ) ); }
+          static void * & functor_ptr( function_buffer       & buffer ) { return buffer.trivial_heap_obj.ptr; }
+          static void *   functor_ptr( function_buffer const & buffer ) { BF_ASSUME( buffer.trivial_heap_obj.ptr ); return functor_ptr( const_cast<function_buffer &>( buffer ) ); }
 
           template <typename Functor>
-          static void assign( Functor const & functor, function_buffer & out_buffer )
+          static void assign( Functor const & functor, function_buffer & out_buffer, Allocator const a )
           {
+              BOOST_ASSERT( a == trivial_allocator() );
+              ignore_unused_variable_warning( a );
+
               BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT
               (
                 functor_traits<Functor>::allowsPODOptimization &&
                 functor_traits<Functor>::hasDefaultAlignement
               );
+
               function_buffer in_buffer;
               in_buffer.trivial_heap_obj.ptr  = const_cast<Functor *>( &functor );
-              in_buffer.trivial_heap_obj.size = ( sizeof( Functor ) / sizeof( storage_atom ) )
-                                                    +
-                                                ( ( sizeof( Functor ) % sizeof( storage_atom ) ) ? 1 : 0 );
+              in_buffer.trivial_heap_obj.size = sizeof( Functor );
               return clone( in_buffer, out_buffer );
           }
 
           static void BF_FASTCALL_WORKAROUND clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
-              std::size_t const storage_array_size( in_buffer.trivial_heap_obj.size );
-              out_buffer.trivial_heap_obj.ptr  = new storage_atom[ storage_array_size ];
-              out_buffer.trivial_heap_obj.size = storage_array_size;
-              std::memcpy( functor_ptr( out_buffer ), functor_ptr( in_buffer ), storage_array_size * sizeof( storage_atom ) );
+              trivial_allocator a;
+              std::size_t const storage_size( in_buffer.trivial_heap_obj.size );
+              out_buffer.trivial_heap_obj.ptr  = a.allocate( storage_size );
+              out_buffer.trivial_heap_obj.size = storage_size;
+              std::memcpy( functor_ptr( out_buffer ), functor_ptr( in_buffer ), storage_size );
           }
 
           static void BF_FASTCALL_WORKAROUND move( function_buffer & in_buffer, function_buffer & out_buffer )
@@ -595,7 +633,8 @@ namespace boost {
 
           static void BF_FASTCALL_WORKAROUND destroy( function_buffer & buffer )
           {
-              delete [] static_cast<storage_atom *>( functor_ptr( buffer ) );
+              trivial_allocator a;
+              a.deallocate( functor_ptr( buffer ) );
               //functor_ptr( buffer ) = 0;
           }
       };
@@ -636,48 +675,95 @@ namespace boost {
 
       ///  Fully generic manager for non-trivial objects that cannot live/fit in
       /// a function_buffer.
-      template <typename FunctorParam>
+      template <typename FunctorParam, typename AllocatorParam>
       struct manager_generic
       {
       public:
-          typedef FunctorParam Functor;
+          typedef FunctorParam   Functor          ;
+          typedef AllocatorParam OriginalAllocator;
 
-          static Functor * & functor_ptr( function_buffer & buffer )
+          typedef          functor_and_allocator<Functor, OriginalAllocator>                              functor_and_allocator_t;
+          typedef typename OriginalAllocator:: BOOST_NESTED_TEMPLATE rebind<functor_and_allocator>::other wrapper_allocator_t    ;
+          typedef typename OriginalAllocator:: BOOST_NESTED_TEMPLATE rebind<OriginalAllocator    >::other allocator_allocator_t  ;
+
+          static functor_and_allocator_t * & functor_ptr( function_buffer & buffer )
           {
-              return *static_cast<Functor * *>
+              return *static_cast<functor_and_allocator_t * *>
               (
                   static_cast<void *>
                   (
-                      &manager_trivial_heap::functor_ptr( buffer )
+                      &manager_trivial_heap<OriginalAllocator>::functor_ptr( buffer )
                   )
               );
           }
 
-          static Functor * functor_ptr( function_buffer const & buffer )
+          static functor_and_allocator_t * functor_ptr( function_buffer const & buffer )
           {
               return functor_ptr( const_cast<function_buffer &>( buffer ) );
           }
 
-          static void assign( Functor const & functor, function_buffer & out_buffer )
+          static void assign( Functor const & functor, function_buffer & out_buffer, OriginalAllocator source_allocator )
           {
-              functor_ptr( out_buffer ) = new Functor( functor );
+              typedef ::boost::type_traits::ice_and
+                        <
+                            ::boost::has_nothrow_copy<Functor          >::value,
+                            ::boost::has_nothrow_copy<OriginalAllocator>::value
+                        > does_not_need_guard_t;
+
+              typedef typename mpl::if_
+              <
+                does_not_need_guard_t,
+                functor_and_allocator_t *,
+                std::auto_ptr<functor_and_allocator_t>
+              >::type guard_t;
+              assign_aux<guard_t>( functor, out_buffer, source_allocator );
           }
 
-          static void clone( const function_buffer& in_buffer, function_buffer& out_buffer )
+          static void clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
-              Functor const & in_functor( *functor_ptr( in_buffer ) );
-              return assign( in_functor, out_buffer );
+              functor_and_allocator_t const & in_functor_and_allocator( *functor_ptr( in_buffer ) );
+              return assign( in_functor_and_allocator.functor(), out_buffer, in_functor_and_allocator.allocator() );
           }
 
-          static void move( function_buffer & in_buffer, function_buffer& out_buffer )
+          static void move( function_buffer & in_buffer, function_buffer & out_buffer )
           {
-              manager_trivial_heap::move( in_buffer, out_buffer );
+              manager_trivial_heap<OriginalAllocator>::move( in_buffer, out_buffer );
           }
 
-          static void destroy( function_buffer& buffer )
+          static void destroy( function_buffer & buffer )
           {
-              checked_delete( functor_ptr( buffer ) );
+              functor_and_allocator_t & in_functor_and_allocator( *functor_ptr( buffer ) );
+
+              OriginalAllocator     original_allocator ( in_functor_and_allocator.allocator() );
+              allocator_allocator_t allocator_allocator( in_functor_and_allocator.allocator() );
+              wrapper_allocator_t   full_allocator     ( in_functor_and_allocator.allocator() );
+
+              original_allocator .destroy( &in_functor_and_allocator.functor  () );
+              allocator_allocator.destroy( &in_functor_and_allocator.allocator() );
+
+              full_allocator.deallocate( &in_functor_and_allocator );
               //functor_ptr( buffer ) = 0;
+          }
+
+        private:
+          template <typename Guard>
+          static functor_and_allocator_t * release( Guard                   &       guard   ) { return guard.release(); }
+          static functor_and_allocator_t * release( functor_and_allocator_t * const pointer ) { return pointer        ; }
+
+          template <typename Guard>
+          static void assign_aux( Functor const & functor, function_buffer & out_buffer, OriginalAllocator source_allocator )
+          {
+              wrapper_allocator_t   full_allocator     ( source_allocator );
+              allocator_allocator_t allocator_allocator( source_allocator );
+
+              Guard                         p_placeholder          ( full_allocator.allocate( 1 ) );
+              Functor               * const p_functor_placeholder  ( p_placeholder                );
+              OriginalAllocator     * const p_allocator_placeholder( p_placeholder                );
+
+              source_allocator   .construct( p_functor_placeholder  , functor          );
+              allocator_allocator.construct( p_allocator_placeholder, source_allocator );
+
+              functor_ptr( out_buffer ) = release( p_placeholder );
           }
       };
 
@@ -685,6 +771,7 @@ namespace boost {
       template
       <
         typename Functor,
+        typename Allocator,
         bool POD,
         bool smallObj,
         bool ptrSmall,
@@ -692,41 +779,42 @@ namespace boost {
       >
       struct functor_manager
       {
-          typedef manager_generic<Functor> type;
+          typedef manager_generic<Functor, Allocator> type;
       };
 
-      template<typename Functor>
-      struct functor_manager<Functor, true, false, false, true>
+      template <typename Functor, typename Allocator>
+      struct functor_manager<Functor, Allocator, true, false, false, true>
       {
-          typedef manager_trivial_heap type;
+          typedef manager_trivial_heap<Allocator> type;
       };
 
-      template<typename Functor, bool defaultAligned>
-      struct functor_manager<Functor, true, true, false, defaultAligned>
+      template <typename Functor, typename Allocator, bool defaultAligned>
+      struct functor_manager<Functor, Allocator, true, true, false, defaultAligned>
       {
           typedef manager_trivial_small type;
       };
 
-      template<typename Functor, bool smallObj, bool defaultAligned>
-      struct functor_manager<Functor, true, smallObj, true, defaultAligned>
+      template <typename Functor, typename Allocator, bool smallObj, bool defaultAligned>
+      struct functor_manager<Functor, Allocator, true, smallObj, true, defaultAligned>
       {
           typedef manager_ptr type;
       };
 
-      template<typename Functor, bool ptrSmall, bool defaultAligned>
-      struct functor_manager<Functor, false, true, ptrSmall, defaultAligned>
+      template <typename Functor, typename Allocator, bool ptrSmall, bool defaultAligned>
+      struct functor_manager<Functor, Allocator, false, true, ptrSmall, defaultAligned>
       {
           typedef manager_small<Functor> type;
       };
 
       /// Metafunction for retrieving an appropriate functor manager with
       /// minimal type information.
-      template<typename StoredFunctor>
+      template<typename StoredFunctor, typename Allocator>
       struct get_functor_manager
       {
           typedef typename functor_manager
                     <
                         StoredFunctor,
+                        Allocator,
                         functor_traits<StoredFunctor>::allowsPODOptimization,
                         functor_traits<StoredFunctor>::allowsSmallObjectOptimization,
                         functor_traits<StoredFunctor>::allowsPtrObjectOptimization,
@@ -735,121 +823,16 @@ namespace boost {
       };
 
       /// Metafunction for retrieving an appropriate fully typed functor manager.
-      template<typename ActualFunctor, typename StoredFunctor>
+      template<typename ActualFunctor, typename StoredFunctor, typename Allocator>
       struct get_typed_functor_manager
       {
           typedef typed_manager
                   <
-                    typename get_functor_manager<StoredFunctor>::type,
+                    typename get_functor_manager<StoredFunctor, Allocator>::type,
                     ActualFunctor,
                     StoredFunctor
                   > type;
       };
-
-/*    ALLOCATOR SUPPORT TEMPORARILY COMMENTED OUT
-      template<typename Functor, typename Allocator>
-      struct functor_manager_a
-      {
-      private:
-        typedef Functor functor_type;
-
-        // Function pointers
-        static inline void
-        manager(const function_buffer& in_buffer, function_buffer& out_buffer, 
-                functor_manager_operation_type op, function_ptr_tag)
-        {
-          manager_common<Functor>::manage_ptr(in_buffer,out_buffer,op);
-        }
-
-        // Function objects that fit in the small-object buffer.
-        static inline void
-        manager(const function_buffer& in_buffer, function_buffer& out_buffer, 
-                functor_manager_operation_type op, mpl::true_)
-        {
-          manager_common<Functor>::manage_small(in_buffer,out_buffer,op);
-        }
-        
-        // Function objects that require heap allocation
-        static inline void
-        manager(const function_buffer& in_buffer, function_buffer& out_buffer, 
-                functor_manager_operation_type op, mpl::false_)
-        {
-          typedef functor_wrapper<Functor,Allocator> functor_wrapper_type;
-          typedef typename Allocator::template rebind<functor_wrapper_type>::other
-            wrapper_allocator_type;
-          typedef typename wrapper_allocator_type::pointer wrapper_allocator_pointer_type;
-
-          if (op == clone_functor_tag) {
-            // Clone the functor
-            // GCC 2.95.3 gets the CV qualifiers wrong here, so we
-            // can't do the static_cast that we should do.
-            const functor_wrapper_type* f =
-              (const functor_wrapper_type*)(in_buffer.obj_ptr);
-            wrapper_allocator_type wrapper_allocator(static_cast<Allocator const &>(*f));
-            wrapper_allocator_pointer_type copy = wrapper_allocator.allocate(1);
-            wrapper_allocator.construct(copy, *f);
-
-            // Get back to the original pointer type
-            functor_wrapper_type* new_f = static_cast<functor_wrapper_type*>(copy);
-            out_buffer.obj_ptr = new_f;
-          } else if (op == move_functor_tag) {
-            out_buffer.obj_ptr = in_buffer.obj_ptr;
-            in_buffer.obj_ptr = 0;
-          } else if (op == destroy_functor_tag) {
-            // Cast from the void pointer to the functor_wrapper_type
-            functor_wrapper_type* victim =
-              static_cast<functor_wrapper_type*>(in_buffer.obj_ptr);
-            wrapper_allocator_type wrapper_allocator(static_cast<Allocator const &>(*victim));
-            wrapper_allocator.destroy(victim);
-            wrapper_allocator.deallocate(victim,1);
-            out_buffer.obj_ptr = 0;
-          } else if (op == check_functor_type_tag) {
-            const detail::sp_typeinfo& check_type 
-              = *out_buffer.type.type;
-            if (BOOST_FUNCTION_COMPARE_TYPE_ID(check_type, BOOST_SP_TYPEID(Functor)))
-              out_buffer.obj_ptr = in_buffer.obj_ptr;
-            else
-              out_buffer.obj_ptr = 0;
-          } else { // op == get_functor_type_tag
-            out_buffer.type.type = &BOOST_SP_TYPEID(Functor);
-            out_buffer.type.const_qualified = false;
-            out_buffer.type.volatile_qualified = false;
-          }
-        }
-
-        // For function objects, we determine whether the function
-        // object can use the small-object optimization buffer or
-        // whether we need to allocate it on the heap.
-        static inline void
-        manager(const function_buffer& in_buffer, function_buffer& out_buffer, 
-                functor_manager_operation_type op, function_obj_tag)
-        {
-          manager(in_buffer, out_buffer, op,
-                  mpl::bool_<(function_allows_small_object_optimization<functor_type>::value)>());
-        }
-
-      public:
-        // Dispatch to an appropriate manager based on whether we have a
-        // function pointer or a function object pointer.
-        static inline void
-        manage(const function_buffer& in_buffer, function_buffer& out_buffer, 
-               functor_manager_operation_type op)
-        {
-          typedef typename get_function_tag<functor_type>::type tag_type;
-          switch (op) {
-          case get_functor_type_tag:
-            out_buffer.type.type = &BOOST_SP_TYPEID(functor_type);
-            out_buffer.type.const_qualified = false;
-            out_buffer.type.volatile_qualified = false;
-            return;
-
-          default:
-            manager(in_buffer, out_buffer, op, tag_type());
-            return;
-          }
-        }
-      };
-*/
 
       // A type that is only used for comparisons against zero
       struct useless_clear_type {};
@@ -1061,15 +1044,15 @@ private: // Private helper guard classes.
           if ( clear )
           {
               BOOST_ASSERT( pFunction_ );
-              typedef          functor_traits     <EmptyHandler>       empty_handler_traits ;
-              typedef typename get_functor_manager<EmptyHandler>::type empty_handler_manager;
+              typedef          functor_traits     <EmptyHandler>                                  empty_handler_traits ;
+              typedef typename get_functor_manager<EmptyHandler, fallocator<EmptyHandler> >::type empty_handler_manager;
               // remove completely or replace with a simple is_stateless<>?
               BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT
               (
                 empty_handler_traits::allowsPODOptimization &&
                 empty_handler_traits::allowsSmallObjectOptimization
               );
-              empty_handler_manager::assign( EmptyHandler(), pFunction_->functor );
+              empty_handler_manager::assign( EmptyHandler(), pFunction_->functor, fallocator<EmptyHandler>() );
               pFunction_->pVTable = &empty_handler_vtable_;
           }
       }
@@ -1166,7 +1149,13 @@ protected:
       // is not necessary here but a simple
       // this->pVTable = &empty_handler_vtable...
       EmptyHandler /*const*/ emptyHandler;
-      assign<false, EmptyHandler>( emptyHandler, empty_handler_vtable, empty_handler_vtable );
+      assign<false, EmptyHandler>
+      (
+        emptyHandler,
+        empty_handler_vtable,
+        empty_handler_vtable, 
+        detail::function::fallocator<EmptyHandler>()
+      );
   }
 
 private: // Assignment from another boost function helpers.
@@ -1189,21 +1178,22 @@ private: // Assignment from another boost function helpers.
 
 protected:
   // Assignment from another boost function.
-  template<bool direct, typename EmptyHandler, typename FunctionObj>
+  template <bool direct, typename EmptyHandler, typename FunctionObj, typename Allocator>
   typename enable_if<is_base_of<function_base, FunctionObj> >::type
   assign
   (
     FunctionObj const & f,
     detail::function::vtable const & functor_vtable,
-    detail::function::vtable const & empty_handler_vtable
+    detail::function::vtable const & empty_handler_vtable,
+    Allocator
   )
   {
-    assert( &functor_vtable == f.pVTable );
-    boost::ignore_unused_variable_warning( functor_vtable );
+    BOOST_ASSERT( &functor_vtable == f.pVTable );
+    ignore_unused_variable_warning( functor_vtable );
     if ( direct )
     {
-        assert( &static_cast<function_base const &>( f ) != this );
-        assert( this->pVTable == &empty_handler_vtable );
+        BOOST_ASSERT( &static_cast<function_base const &>( f ) != this );
+        BOOST_ASSERT( this->pVTable == &empty_handler_vtable );
         assign_direct( f );
     }
     else if( &static_cast<function_base const &>( f ) != this )
@@ -1213,46 +1203,49 @@ protected:
   }
 
   // General actual assignment.
-  template<bool direct, typename EmptyHandler, typename FunctionObj>
+  template <bool direct, typename EmptyHandler, typename FunctionObj, typename Allocator>
   typename disable_if<is_base_of<function_base, FunctionObj> >::type
   assign
   (
     FunctionObj const & f,
     detail::function::vtable const & functor_vtable,
-    detail::function::vtable const & empty_handler_vtable
+    detail::function::vtable const & empty_handler_vtable,
+    Allocator
   );
 
-  template<typename EmptyHandler, typename FunctionObj>
+  template <typename EmptyHandler, typename FunctionObj, typename Allocator>
   BF_NOTHROW
   void actual_assign
   (
-    FunctionObj const & f,
+    FunctionObj              const & f,
     detail::function::vtable const & functor_vtable,
     detail::function::vtable const & /*empty_handler_vtable*/,
+    Allocator                const   a,
     mpl::true_ /*can use direct assign*/
   )
   {
-      typedef typename detail::function::get_functor_manager<FunctionObj>::type functor_manager;
+      typedef typename detail::function::get_functor_manager<FunctionObj, Allocator>::type functor_manager;
       this->destroy();
-      functor_manager::assign( f, this->functor );
+      functor_manager::assign( f, this->functor, a );
       this->pVTable = &functor_vtable;
   }
 
-  template<typename EmptyHandler, typename FunctionObj>
+  template<typename EmptyHandler, typename FunctionObj, typename Allocator>
   void actual_assign
   (
-    FunctionObj const & f,
+    FunctionObj              const & f,
     detail::function::vtable const & functor_vtable,
     detail::function::vtable const & empty_handler_vtable,
+    Allocator                const   a,
     mpl::false_ /*must use safe assignment*/
   )
   {
       // This most generic case needs to be reworked [currently uses redundant
       // copying (generic one, through function pointers) and does not use all
       // the type information it can...]...
-      typedef typename detail::function::get_functor_manager<FunctionObj>::type functor_manager;
+      typedef typename detail::function::get_functor_manager<FunctionObj, Allocator>::type functor_manager;
       function_base tmp( empty_handler_vtable );
-      functor_manager::assign( f, tmp.functor );
+      functor_manager::assign( f, tmp.functor, a );
       tmp.pVTable = &functor_vtable;
       this->swap<EmptyHandler>( tmp, empty_handler_vtable );
   }
@@ -1327,7 +1320,7 @@ public:
 template <class EmptyHandler>
 void function_base::swap( function_base & other, detail::function::vtable const & empty_handler_vtable )
 {
-    if (&other == this)
+    if ( &other == this )
         return;
 
     function_base tmp( empty_handler_vtable );
@@ -1602,13 +1595,14 @@ namespace detail {
 } // end namespace detail
 
 //...zzz...here because of has_empty_target()...GCC & Clang are not lazy enough
-template<bool direct, typename EmptyHandler, typename FunctionObj>
+template <bool direct, typename EmptyHandler, typename FunctionObj, typename Allocator>
 typename disable_if<is_base_of<function_base, FunctionObj> >::type
 function_base::assign
 (
-    FunctionObj const & f,
+    FunctionObj              const & f,
     detail::function::vtable const & functor_vtable,
-    detail::function::vtable const & empty_handler_vtable
+    detail::function::vtable const & empty_handler_vtable,
+    Allocator                const   a
 )
 {
     using namespace detail::function;
@@ -1619,8 +1613,8 @@ function_base::assign
     if ( direct )
     {
         BOOST_ASSERT( this->pVTable == &empty_handler_vtable );
-        typedef typename get_functor_manager<FunctionObj>::type functor_manager;
-        functor_manager::assign( f, this->functor );
+        typedef typename get_functor_manager<FunctionObj, Allocator>::type functor_manager;
+        functor_manager::assign( f, this->functor, a );
         this->pVTable = &functor_vtable;
         return;
     }
@@ -1629,22 +1623,24 @@ function_base::assign
         // This can/should be rewritten because the small-object-optimization
         // condition is too strict (requires a trivial destructor which is not
         // needed for a no fail assignment).
+        typedef ::boost::type_traits::ice_and
+                <
+                    functor_traits<FunctionObj>::allowsSmallObjectOptimization,
+                    ::boost::type_traits::ice_or
+                    <
+                        ::boost::has_nothrow_copy<FunctionObj>::value,
+                        ::boost::has_trivial_copy<FunctionObj>::value,
+                        ::boost::detail::function::is_msvc_exception_specified_function_pointer<FunctionObj>::value
+                    >::value
+                > has_no_fail_assignement_t;
 
         actual_assign<EmptyHandler>
         (
             f,
             functor_vtable,
             empty_handler_vtable,
-            mpl::bool_
-            <
-                //has_no_fail_assignement:
-                functor_traits<FunctionObj>::allowsSmallObjectOptimization &&
-                (
-                    has_nothrow_copy_constructor<FunctionObj>::value ||
-                    has_trivial_copy_constructor<FunctionObj>::value ||
-                    is_msvc_exception_specified_function_pointer<FunctionObj>::value
-                )
-            >()
+            a,
+            has_no_fail_assignement_t()
         );
     }
 }
