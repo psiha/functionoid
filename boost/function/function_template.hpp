@@ -240,35 +240,41 @@ namespace boost {
 
     // MSVC chokes if the following two constructors are collapsed into
     // one with a default parameter.
-    template<typename Functor>
-    BOOST_FUNCTION_FUNCTION(Functor BOOST_FUNCTION_TARGET_FIX(const &) f
-#ifndef BOOST_NO_SFINAE
-                            ,typename enable_if_c<
-                            (boost::type_traits::ice_not<
-                             (is_integral<Functor>::value)>::value),
-                                        int>::type = 0
-#endif // BOOST_NO_SFINAE
-                            ) :
+    template <typename Functor>
+    BOOST_FUNCTION_FUNCTION
+    (
+        Functor BOOST_FUNCTION_TARGET_FIX(const &) f
+        #ifndef BOOST_NO_SFINAE
+            ,typename enable_if_c<
+            (boost::type_traits::ice_not<
+                (is_integral<Functor>::value)>::value),
+                        int>::type = 0
+        #endif // BOOST_NO_SFINAE
+    )
+      :
       function_base( empty_handler_vtable() )
     {
       this->do_assign<true, Functor>( f );
     }
 
-/*    ALLOCATOR SUPPORT TEMPORARILY COMMENTED OUT
-    template<typename Functor,typename Allocator>
-    BOOST_FUNCTION_FUNCTION(Functor BOOST_FUNCTION_TARGET_FIX(const &) f, Allocator a
-#ifndef BOOST_NO_SFINAE
-                            ,typename enable_if_c<
-                            (boost::type_traits::ice_not<
-                             (is_integral<Functor>::value)>::value),
-                                        int>::type = 0
-#endif // BOOST_NO_SFINAE
-                            ) :
+    template <typename Functor, typename Allocator>
+    BOOST_FUNCTION_FUNCTION
+    (
+        Functor BOOST_FUNCTION_TARGET_FIX(const &) f,
+        Allocator const a
+        #ifndef BOOST_NO_SFINAE
+            ,typename enable_if_c<
+            (boost::type_traits::ice_not<
+                (is_integral<Functor>::value)>::value),
+                        int>::type = 0
+        #endif // BOOST_NO_SFINAE
+    )
+      :
       function_base( empty_handler_vtable() )
     {
-      this->assign_to_a(f,a);
+      this->do_assign<true, Functor>( f, a );
     }
-*/
+
 
 #ifndef BOOST_NO_SFINAE
     BOOST_FUNCTION_FUNCTION(clear_type*) : function_base( empty_handler_vtable() ) { }
@@ -369,13 +375,12 @@ namespace boost {
       return *this;
     }
 
-/*    ALLOCATOR SUPPORT TEMPORARILY COMMENTED OUT
-    template<typename Functor,typename Allocator>
-    void assign(Functor BOOST_FUNCTION_TARGET_FIX(const &) f, Allocator a)
+    template <typename FunctionObj, typename Allocator>
+    void assign( FunctionObj BOOST_FUNCTION_TARGET_FIX(const &) f, Allocator const a )
     {
-      this->assign_to_a(f,a);
+        this->do_assign<false, FunctionObj>( f, a );
     }
-*/
+
 
 #ifndef BOOST_NO_SFINAE
     BOOST_FUNCTION_FUNCTION& operator=(clear_type*)
@@ -403,7 +408,7 @@ namespace boost {
     bool operator!() const { return this->empty(); }
 
 private:
-    static vtable_type const & empty_handler_vtable() { return vtable_for_functor<base_empty_handler>( my_empty_handler() ); }
+    static vtable_type const & empty_handler_vtable() { return vtable_for_functor<detail::function::fallocator<base_empty_handler>, base_empty_handler>( my_empty_handler() ); }
 
     template <class F>
     static bool nothrow_test( F & f BOOST_FUNCTION_COMMA BOOST_FUNCTION_PARMS )
@@ -484,14 +489,14 @@ private:
 	// for the signature template parameter to be the same (and therefor the vtable is the same, with
 	// a possible exception being the case of an empty source as empty handler vtables depend on the
 	// policy as well as the signature).
-    template <typename ActualFunctor>
+    template <typename Allocator, typename ActualFunctor>
     static vtable_type const & vtable_for_functor( BOOST_FUNCTION_FUNCTION const & functor )
     {
       BOOST_STATIC_ASSERT(( is_base_of<BOOST_FUNCTION_FUNCTION, ActualFunctor>::value ));
       return functor.get_vtable();
     }
 
-    template <typename ActualFunctor, typename StoredFunctor>
+    template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
     typename disable_if<is_base_of<BOOST_FUNCTION_FUNCTION, StoredFunctor>, vtable_type const &>::type
     static vtable_for_functor( StoredFunctor const & /*functor*/ )
     {
@@ -500,7 +505,8 @@ private:
       // A minimally typed manager is used for the invoker (anti-code-bloat).
       typedef typename get_functor_manager
               <
-                StoredFunctor
+                StoredFunctor,
+                Allocator
               >::type invoker_manager_type;
 
       // For the empty handler we use the manager for the base_empty_handler not
@@ -515,7 +521,8 @@ private:
                   is_same<ActualFunctor, base_empty_handler>,
                   ActualFunctor,
                   StoredFunctor
-                >::type
+                >::type,
+                Allocator
               >::type manager_type;
 
       typedef typename mpl::if_
@@ -538,55 +545,34 @@ private:
       return vtable_holder<invoker_type, manager_type>::stored_vtable;
     }
 
-/*    ALLOCATOR SUPPORT TEMPORARILY COMMENTED OUT
-    template<typename Functor,typename Allocator>
-    static vtable_type const & vtable_for_functor_a()
-    {
-      using detail::function::vtable_base;
 
-      typedef typename detail::function::get_function_tag<Functor>::type tag;
-      typedef detail::function::BOOST_FUNCTION_GET_INVOKER<tag> get_invoker;
-      typedef typename get_invoker::
-                         template apply_a<Functor, R BOOST_FUNCTION_COMMA 
-                         BOOST_FUNCTION_TEMPLATE_ARGS,
-                         Allocator>
-        handler_type;
-      
-      typedef typename handler_type::invoker_type                     invoker_type;
-      typedef typename boost::mpl::if_
-              <
-                boost::is_base_of<base_empty_handler, Functor>,
-                detail::function::functor_manager<base_empty_handler>,
-                detail::function::functor_manager_a<Functor, Allocator>
-              >::type manager_type;
-      
-      return static_cast<vtable_type const &>( detail::function::vtable_holder<invoker_type, manager_type>::stored_vtable );
-    }
-*/
     // ...direct actually means whether to skip pre-destruction (when not
     // assigning but constructing) so it should probably be renamed to
     // pre_destroy or the whole thing solved in some smarter way...
-    template<bool direct, typename FunctionObj>
-    void do_assign( FunctionObj const & f )
+    template<bool direct, typename FunctionObj, typename Allocator>
+    void do_assign( FunctionObj const & f, Allocator const a )
     {
         typedef typename detail::function::get_function_tag<FunctionObj>::type tag;
-        dispatch_assign<direct, FunctionObj>( f, tag() );
+        dispatch_assign<direct, FunctionObj>( f, a, tag() );
     }
 
     template<bool direct, typename FunctionObj>
-    void dispatch_assign( FunctionObj const & f, detail::function::function_obj_tag     ) { do_assign<direct, FunctionObj               >( f      ,        f   ); }
-    template<bool direct, typename FunctionObj>
-    void dispatch_assign( FunctionObj const & f, detail::function::function_ptr_tag     ) { do_assign<direct, FunctionObj               >( f      ,        f   ); }
+    void do_assign( FunctionObj const & f ) { do_assign<direct>( f, detail::function::fallocator<FunctionObj>() ); }
+
+    template<bool direct, typename FunctionObj, typename Allocator>
+    void dispatch_assign( FunctionObj const & f, Allocator const a, detail::function::function_obj_tag     ) { do_assign<direct, FunctionObj>( f      ,        f   , a ); }
+    template<bool direct, typename FunctionObj, typename Allocator>
+    void dispatch_assign( FunctionObj const & f, Allocator const a, detail::function::function_ptr_tag     ) { do_assign<direct, FunctionObj>( f      ,        f   , a ); }
     // DPG TBD: Add explicit support for member function
     // objects, so we invoke through mem_fn() but we retain the
     // right target_type() values.
-    template<bool direct, typename FunctionObj>
-    void dispatch_assign( FunctionObj const & f, detail::function::member_ptr_tag       ) { do_assign<direct, FunctionObj               >( f      , mem_fn( f ) ); }
-    template<bool direct, typename FunctionObj>
-    void dispatch_assign( FunctionObj const & f, detail::function::function_obj_ref_tag ) { do_assign<direct, typename FunctionObj::type>( f.get(),         f   ); }
+    template<bool direct, typename FunctionObj, typename Allocator>
+    void dispatch_assign( FunctionObj const & f, Allocator const a, detail::function::member_ptr_tag       ) { do_assign<direct, FunctionObj>( f      , mem_fn( f ), a ); }
+    template<bool direct, typename FunctionObj, typename Allocator>
+    void dispatch_assign( FunctionObj const & f, Allocator const a, detail::function::function_obj_ref_tag ) { do_assign<direct, typename FunctionObj::type>( f.get(),         f  , a ); }
 
-    template<bool direct, typename ActualFunctor, typename StoredFunctor>
-    void do_assign( ActualFunctor const & original_functor, StoredFunctor const & stored_functor )
+    template<bool direct, typename ActualFunctor, typename StoredFunctor, typename ActualFunctorAllocator>
+    void do_assign( ActualFunctor const & original_functor, StoredFunctor const & stored_functor, ActualFunctorAllocator const a )
     {
         if
         (
@@ -611,24 +597,23 @@ private:
             (
                 emptyHandler,
                 empty_handler_vtable(),
-                empty_handler_vtable()
+                empty_handler_vtable(),
+                detail::function::fallocator<base_empty_handler>()
             );
             emptyHandler. BOOST_NESTED_TEMPLATE handle_empty_invoke<R>();
         }
         else
+        {
+            typedef typename ActualFunctorAllocator:: BOOST_NESTED_TEMPLATE rebind<StoredFunctor>::other StoredFunctorAllocator;
             function_base::assign<direct, base_empty_handler>
             (
                 stored_functor,
-                vtable_for_functor<ActualFunctor>( stored_functor ),
-                empty_handler_vtable()
+                vtable_for_functor<StoredFunctorAllocator, ActualFunctor>( stored_functor ),
+                empty_handler_vtable(),
+                StoredFunctorAllocator( a )
             );
+        }
     }
-
-
-/*    ALLOCATOR SUPPORT TEMPORARILY COMMENTED OUT
-    template<typename Functor,typename Allocator>
-    void assign_to_a(Functor f,Allocator a) { assert( !"Implement" ); }
-*/
   };
 
   template<typename R BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_PARMS, class PolicyList>
@@ -681,32 +666,37 @@ class function<BOOST_FUNCTION_PARTIAL_SPEC>
 public:
   function() {}
 
-  template<typename Functor>
-  function(Functor const & f
-#ifndef BOOST_NO_SFINAE
-           ,typename enable_if_c<
-                            (boost::type_traits::ice_not<
-                          (is_integral<Functor>::value)>::value),
-                       int>::type = 0
-#endif
-           ) :
-    base_type(f)
-  {
-  }
-/*    ALLOCATOR SUPPORT TEMPORARILY COMMENTED OUT
-  template<typename Functor,typename Allocator>
-  function(Functor f, Allocator a
-#ifndef BOOST_NO_SFINAE
-           ,typename enable_if_c<
-                            (boost::type_traits::ice_not<
-                          (is_integral<Functor>::value)>::value),
-                       int>::type = 0
-#endif
-           ) :
-    base_type(f,a)
-  {
-  }
-*/
+  template <typename Functor>
+  function
+  (
+    Functor const & f
+    #ifndef BOOST_NO_SFINAE
+        ,typename enable_if_c<
+                        (boost::type_traits::ice_not<
+                        (is_integral<Functor>::value)>::value),
+                    int>::type = 0
+    #endif
+  )
+    :
+    base_type( f )
+  {}
+
+  template <typename Functor, typename Allocator>
+  function
+  (
+    Functor   const & f,
+    Allocator const   a
+    #ifndef BOOST_NO_SFINAE
+        ,typename enable_if_c<
+                        (boost::type_traits::ice_not<
+                        (is_integral<Functor>::value)>::value),
+                    int>::type = 0
+    #endif
+  )
+    :
+    base_type( f, a )
+  {}
+
 #ifndef BOOST_NO_SFINAE
   function(clear_type*) : base_type() {}
 #endif
