@@ -176,7 +176,7 @@ namespace boost {
             void construct( pointer const ptr, T const & source ) { new ( ptr ) T( source ); }
             void destroy  ( pointer const ptr                   ) { ptr->~T(); }
 
-            static size_type max_size() { return std::numeric_limits<size_type>::max() / sizeof( T ); }
+            static size_type max_size() { return (std::numeric_limits<size_type>::max)() / sizeof( T ); }
         };
 
         typedef fallocator<void *> dummy_allocator;
@@ -704,11 +704,14 @@ namespace boost {
 
           static void assign( Functor const & functor, function_buffer & out_buffer, OriginalAllocator source_allocator )
           {
-              typedef ::boost::type_traits::ice_and
-                        <
-                            ::boost::has_nothrow_copy<Functor          >::value,
-                            ::boost::has_nothrow_copy<OriginalAllocator>::value
-                        > does_not_need_guard_t;
+              typedef mpl::bool_
+              <
+                  ::boost::type_traits::ice_and
+                  <
+                      ::boost::has_nothrow_copy<Functor          >::value,
+                      ::boost::has_nothrow_copy<OriginalAllocator>::value
+                  >::value
+              > does_not_need_guard_t;
 
               typedef typename mpl::if_
               <
@@ -1623,16 +1626,19 @@ function_base::assign
         // This can/should be rewritten because the small-object-optimization
         // condition is too strict (requires a trivial destructor which is not
         // needed for a no fail assignment).
-        typedef ::boost::type_traits::ice_and
+        typedef mpl::bool_
+        <
+            ::boost::type_traits::ice_and
+            <
+                functor_traits<FunctionObj>::allowsSmallObjectOptimization,
+                ::boost::type_traits::ice_or
                 <
-                    functor_traits<FunctionObj>::allowsSmallObjectOptimization,
-                    ::boost::type_traits::ice_or
-                    <
-                        ::boost::has_nothrow_copy<FunctionObj>::value,
-                        ::boost::has_trivial_copy<FunctionObj>::value,
-                        ::boost::detail::function::is_msvc_exception_specified_function_pointer<FunctionObj>::value
-                    >::value
-                > has_no_fail_assignement_t;
+                    ::boost::has_nothrow_copy<FunctionObj>::value,
+                    ::boost::has_trivial_copy<FunctionObj>::value,
+                    ::boost::detail::function::is_msvc_exception_specified_function_pointer<FunctionObj>::value
+                >::value
+            >::value
+        > has_no_fail_assignement_t;
 
         actual_assign<EmptyHandler>
         (
