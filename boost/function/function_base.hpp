@@ -470,7 +470,7 @@ namespace boost {
       };
 
 
-      #ifdef _DEBUG
+      #ifndef NDEBUG
         template <typename T>
         void debug_clear( T & target )
         {    
@@ -1115,7 +1115,12 @@ private: // Private helper guard classes.
   class safe_mover;
 
 public:
-    function_base( detail::function::vtable const & vtable ) : p_vtable_( &vtable ) { detail::function::debug_clear( this->functor_ ); }
+    template <class EmptyHandler>
+    function_base( detail::function::vtable const & empty_handler_vtable, EmptyHandler )
+    {
+        detail::function::debug_clear( *this );
+        this->clear<true, EmptyHandler>( empty_handler_vtable );
+    }
     ~function_base() { destroy(); }
 
   template <class EmptyHandler>
@@ -1192,7 +1197,7 @@ protected:
       return *p_vtable_;
   }
 
-  template <class EmptyHandler>
+  template <bool direct, class EmptyHandler>
   BF_NOTHROW
   void clear( detail::function::vtable const & empty_handler_vtable )
   {
@@ -1200,7 +1205,7 @@ protected:
       // is not necessary here but a simple
       // this->p_vtable_ = &empty_handler_vtable...
       EmptyHandler /*const*/ emptyHandler;
-      assign<false, EmptyHandler>
+      assign<direct, EmptyHandler>
       (
         emptyHandler,
         empty_handler_vtable,
@@ -1666,11 +1671,18 @@ void function_base::assign
     using namespace detail::function;
 
     if ( has_empty_target( boost::addressof( f ) ) )
-        this->clear<EmptyHandler>( empty_handler_vtable );
+        this->clear<direct, EmptyHandler>( empty_handler_vtable );
     else
     if ( direct )
     {
-        BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable );
+        BOOST_ASSERT
+        (
+            ( this->p_vtable_ == &empty_handler_vtable ) ||
+            (
+                is_same<EmptyHandler, FunctionObj>::value &&
+                this->p_vtable_ == NULL
+            )
+        );
         typedef typename get_functor_manager<FunctionObj, Allocator>::type functor_manager;
         functor_manager::assign( f, this->functor_, a );
         this->p_vtable_ = &functor_vtable;
