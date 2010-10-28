@@ -58,6 +58,7 @@
 #include <boost/type_traits/ice.hpp>
 #include <boost/type_traits/remove_const.hpp>
 #include <boost/type_traits/remove_pointer.hpp>
+#include <boost/type_traits/remove_reference.hpp>
 #include <boost/ref.hpp>
 #include <boost/static_assert.hpp>
 #include <boost/mpl/at.hpp>
@@ -1578,12 +1579,18 @@ namespace detail {
       return f->empty();
     }
 
-    template <class FunctionPtr>
-    inline bool has_empty_target( reference_wrapper<FunctionPtr> const * const f )
+    template <class FunctionObj>
+    inline bool has_empty_target( reference_wrapper<FunctionObj> const * const f )
     {
-        //...zzz...return has_empty_target( f->get_pointer() );
+        // Implementation note:
+        //   We save/assign a reference to a boost::function even if it is empty
+        // and let the referenced function handle a possible empty invocation.
+        //                                    (28.10.2010.) (Domagoj Saric)
+        BF_ASSUME( f                != 0 );
         BF_ASSUME( f->get_pointer() != 0 );
-        return f == 0;
+        return is_base_of<function_base, Function>::value
+                ? return ( f == 0 )
+                : return has_empty_target( f->get_pointer() );
     }
 
     template <class FunctionPtr>
@@ -1599,11 +1606,12 @@ namespace detail {
         return funcPtr == 0;
     }
 
-#ifdef BOOST_MSVC // MSVC (9.0 SP1 and prior) cannot inline vararg functions
+    // Implementation note:
+    //   Even the best compilers seem unable to inline vararg functions
+    // (e.g.MSVC 9.0 SP1 and GCC 4.6).
+    //                                        (28.10.2010.) (Domagoj Saric)
+    //inline bool has_empty_target(...)
     inline bool has_empty_target( void const * )
-#else
-    inline bool has_empty_target(...)
-#endif
     {
       return false;
     }
