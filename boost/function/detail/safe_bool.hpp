@@ -19,6 +19,7 @@
 #ifndef safe_bool_hpp__7E590FD4_CE99_442C_82DB_8DC9CB7D3886
 #define safe_bool_hpp__7E590FD4_CE99_442C_82DB_8DC9CB7D3886
 //------------------------------------------------------------------------------
+#include "boost/assert.hpp"
 #include "boost/mpl/bool.hpp"
 #include "boost/mpl/if.hpp"
 //------------------------------------------------------------------------------
@@ -96,7 +97,7 @@ private:
     unspecified_bool_type make_safe_bool_worker( bool const value, mpl::true_ /*use fast-hack version*/ )
     {
         fast_safe_bool const fastSafeBool = { value };
-        assert
+        BOOST_ASSERT
         (
             ( !!fastSafeBool.pointer_to_member == !!value ) &&
             "The void-pointer-sized member pointer null binary"
@@ -129,20 +130,6 @@ public:
 }; // namespace detail
 
 
-
-// If we could use member pointers before the member is actually declared/seen
-// we could use CRTP-based helper classes for minimum verbosity safe_bool
-// implementations:
-// template <class Base, bool (Base::*bool_function) () const>
-// class safe_bool
-// {
-//     operator unspecified_bool_type() const { return make_safe_bool( static_cast<Base const *>( this )->*bool_function() ); }
-// };
-//
-// class my_class : public safe_bool<my_class, &my_class::valid>
-//...
-
-//...instead we are left with macros...
 #define BOOST_SAFE_BOOL_FROM_FUNCTION( classType, constMemberFunction ) \
     operator boost::safe_bool<classType>::type() const { return boost::safe_bool<classType>::make( constMemberFunction() ); }
 
