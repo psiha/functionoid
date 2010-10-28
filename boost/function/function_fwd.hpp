@@ -27,17 +27,16 @@ namespace boost { namespace python { namespace objects {
 #endif
 
 namespace boost {
-  class bad_function_call;
   class assert_on_empty;
-  class throw_on_empty;
-  struct EmptyHandler {};
-  struct Nothrow {};
+  class nop_on_empty   ;
+  class throw_on_empty ;
 
-  struct default_policies : public mpl::map2
-      <
-        mpl::pair<EmptyHandler, throw_on_empty>,
-        mpl::pair<Nothrow     , mpl::false_   >
-      > {};
+  class bad_function_call;
+
+  struct EmptyHandler {};
+  struct Nothrow      {};
+
+  typedef mpl::map0<> default_policies;
 
 #if !defined(BOOST_FUNCTION_NO_FUNCTION_TYPE_SYNTAX)
   // Preferred syntax
