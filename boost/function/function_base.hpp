@@ -474,7 +474,7 @@ namespace boost {
         template <typename T>
         void debug_clear( T & target )
         {    
-            std::memset( &target, 0, sizeof( target ) );
+            std::memset( boost::addressof( target ), 0, sizeof( target ) );
         }
       #else
         template <typename T> void debug_clear( T & ) {}
@@ -1301,7 +1301,7 @@ protected:
       // copying (generic one, through function pointers) and does not use all
       // the type information it can...]...
       typedef typename detail::function::get_functor_manager<FunctionObj, Allocator>::type functor_manager;
-      function_base tmp( empty_handler_vtable );
+      function_base tmp( empty_handler_vtable, EmptyHandler() );
       functor_manager::assign( f, tmp.functor_, a );
       tmp.p_vtable_ = &functor_vtable;
       this->swap<EmptyHandler>( tmp, empty_handler_vtable );
@@ -1380,7 +1380,7 @@ void function_base::swap( function_base & other, detail::function::vtable const 
     if ( &other == this )
         return;
 
-    function_base tmp( empty_handler_vtable );
+    function_base tmp( empty_handler_vtable, EmptyHandler() );
 
     safe_mover<EmptyHandler> my_restorer   ( *this, tmp   );
 
