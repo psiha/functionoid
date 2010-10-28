@@ -1096,8 +1096,8 @@ private: // Private helper guard classes.
                 empty_handler_traits::allowsPODOptimization &&
                 empty_handler_traits::allowsSmallObjectOptimization
               );
-              empty_handler_manager::assign( EmptyHandler(), pFunction_->functor, fallocator<EmptyHandler>() );
-              pFunction_->pVTable = &empty_handler_vtable_;
+              empty_handler_manager::assign( EmptyHandler(), pFunction_->functor_, fallocator<EmptyHandler>() );
+              pFunction_->p_vtable_ = &empty_handler_vtable_;
           }
       }
 
@@ -1111,7 +1111,7 @@ private: // Private helper guard classes.
   class safe_mover;
 
 public:
-    function_base( detail::function::vtable const & vtable ) : pVTable( &vtable ) { detail::function::debug_clear( this->functor ); }
+    function_base( detail::function::vtable const & vtable ) : p_vtable_( &vtable ) { detail::function::debug_clear( this->functor_ ); }
     ~function_base() { destroy(); }
 
   template <class EmptyHandler>
@@ -1122,13 +1122,13 @@ public:
   /// Retrieve the type of the stored function object.
   detail::sp_typeinfo const & target_type() const
   {
-    return get_vtable().get_typed_functor( this->functor ).functor_type_info();
+    return get_vtable().get_typed_functor( this->functor_ ).functor_type_info();
   }
 
   template <typename Functor>
   Functor * target()
   {
-    return get_vtable().get_typed_functor( this->functor ).target<Functor>();
+    return get_vtable().get_typed_functor( this->functor_ ).target<Functor>();
   }
 
   template <typename Functor>
@@ -1178,10 +1178,14 @@ public:
 #endif // BOOST_FUNCTION_NO_RTTI
 
 protected:
+  // Implementation note:
+  //   GCC 4.5.1 makes an IMO poor judgment of not inlining this with -Os.
+  //                                        (28.10.2010.) (Domagoj Saric)
+  BF_FORCEINLINE
   detail::function::vtable const & get_vtable() const
   {
-      BF_ASSUME( pVTable );
-      return *pVTable;
+      BF_ASSUME( p_vtable_ );
+      return *p_vtable_;
   }
 
   template <class EmptyHandler>
@@ -1190,7 +1194,7 @@ protected:
   {
       //  If we hold to the is_stateless<EmptyHandler> requirement a full assign
       // is not necessary here but a simple
-      // this->pVTable = &empty_handler_vtable...
+      // this->p_vtable_ = &empty_handler_vtable...
       EmptyHandler /*const*/ emptyHandler;
       assign<false, EmptyHandler>
       (
@@ -1206,8 +1210,8 @@ private: // Assignment from another boost function helpers.
   BF_NOINLINE
   void assign_boost_function_direct( function_base const & source )
   {
-      source.pVTable->clone( source.functor, this->functor );
-      pVTable = source.pVTable;
+      source.p_vtable_->clone( source.functor_, this->functor_ );
+      p_vtable_ = source.p_vtable_;
   }
 
   template <class EmptyHandler>
@@ -1232,12 +1236,12 @@ protected:
     mpl::true_ /*assignment of an instance of the same boost::function<> instantiation*/
   )
   {
-    BOOST_ASSERT( &functor_vtable == f.pVTable );
+    BOOST_ASSERT( &functor_vtable == f.p_vtable_ );
     ignore_unused_variable_warning( functor_vtable );
     if ( direct )
     {
         BOOST_ASSERT( &static_cast<function_base const &>( f ) != this );
-        BOOST_ASSERT( this->pVTable == &empty_handler_vtable );
+        BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable );
         assign_boost_function_direct( f );
     }
     else if( &static_cast<function_base const &>( f ) != this )
@@ -1270,8 +1274,8 @@ protected:
   {
       typedef typename detail::function::get_functor_manager<FunctionObj, Allocator>::type functor_manager;
       this->destroy();
-      functor_manager::assign( f, this->functor, a );
-      this->pVTable = &functor_vtable;
+      functor_manager::assign( f, this->functor_, a );
+      this->p_vtable_ = &functor_vtable;
   }
 
   template<typename EmptyHandler, typename FunctionObj, typename Allocator>
@@ -1289,18 +1293,18 @@ protected:
       // the type information it can...]...
       typedef typename detail::function::get_functor_manager<FunctionObj, Allocator>::type functor_manager;
       function_base tmp( empty_handler_vtable );
-      functor_manager::assign( f, tmp.functor, a );
-      tmp.pVTable = &functor_vtable;
+      functor_manager::assign( f, tmp.functor_, a );
+      tmp.p_vtable_ = &functor_vtable;
       this->swap<EmptyHandler>( tmp, empty_handler_vtable );
   }
 
 private:
-    void destroy() { get_vtable().destroy( this->functor ); }
+    void destroy() { get_vtable().destroy( this->functor_ ); }
 
 protected:
   // Fix/properly encapsulate these members and use the function_buffer_holder.
-          detail::function::vtable          const * pVTable;
-  mutable detail::function::function_buffer         functor;
+          detail::function::vtable          const * p_vtable_;
+  mutable detail::function::function_buffer         functor_ ;
 };
 
 
@@ -1317,7 +1321,7 @@ protected:
         emptyFunctionToMoveTo_( emptyFunctionToMoveTo              ),
         empty_handler_vtable_ ( emptyFunctionToMoveTo.get_vtable() )
     {
-        BOOST_ASSERT( emptyFunctionToMoveTo.pVTable == &empty_handler_vtable_ );
+        BOOST_ASSERT( emptyFunctionToMoveTo.p_vtable_ == &empty_handler_vtable_ );
         move( functionToGuard, emptyFunctionToMoveTo, empty_handler_vtable_ );
     }
 
@@ -1328,9 +1332,9 @@ public:
 
     static void move( function_base & source, function_base & destination, vtable const & empty_handler_vtable )
     {
-        source.get_vtable().move( source.functor, destination.functor );
-        destination.pVTable = source.pVTable;
-        source     .pVTable = &empty_handler_vtable;
+        source.get_vtable().move( source.functor_, destination.functor_ );
+        destination.p_vtable_ = source.p_vtable_;
+        source     .p_vtable_ = &empty_handler_vtable;
     }
 
 protected:
@@ -1657,10 +1661,10 @@ void function_base::assign
     else
     if ( direct )
     {
-        BOOST_ASSERT( this->pVTable == &empty_handler_vtable );
+        BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable );
         typedef typename get_functor_manager<FunctionObj, Allocator>::type functor_manager;
-        functor_manager::assign( f, this->functor, a );
-        this->pVTable = &functor_vtable;
+        functor_manager::assign( f, this->functor_, a );
+        this->p_vtable_ = &functor_vtable;
         return;
     }
     else
