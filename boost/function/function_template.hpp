@@ -137,8 +137,8 @@ namespace boost {
   <
     typename R BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_PARMS,
     class PolicyList
-    #if ( BOOST_FUNCTION_MAX_ARGS > 10 )
-        = default_policies //...zzz...this causes hoards of warnings...
+    #if ( BOOST_FUNCTION_NUM_ARGS > 10 )
+        = default_policies
     #endif // BOOST_FUNCTION_MAX_ARGS > 10
   >
   class BOOST_FUNCTION_FUNCTION : public function_base
@@ -156,11 +156,12 @@ namespace boost {
   {
   private: // Actual policies deduction section.
     //mpl::at<AssocSeq,Key,Default> does not yet exist so...:
-    typedef typename mpl::at<PolicyList      , EmptyHandler>::type user_specified_empty_handler;
-    typedef typename mpl::at<default_policies, EmptyHandler>::type default_empty_handler;
 
-    typedef typename mpl::at<PolicyList      , Nothrow>::type user_specified_nothrow_policy;
-    typedef typename mpl::at<default_policies, Nothrow>::type default_nothrow_policy;
+    typedef throw_on_empty                                   default_empty_handler ;
+    typedef mpl::false_                                      default_nothrow_policy;
+
+    typedef typename mpl::at<PolicyList, EmptyHandler>::type user_specified_empty_handler ;
+    typedef typename mpl::at<PolicyList, Nothrow     >::type user_specified_nothrow_policy;
 
   public: // Public typedefs/introspection section.
 #ifndef BOOST_NO_VOID_RETURNS

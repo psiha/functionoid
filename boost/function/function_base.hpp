@@ -28,6 +28,7 @@
 
 #include <boost/aligned_storage.hpp>
 #include <boost/concept_check.hpp>
+#include <boost/get_pointer.hpp>
 #include <boost/noncopyable.hpp>
 #include <boost/type_traits/add_const.hpp>
 #include <boost/type_traits/add_reference.hpp>
@@ -126,9 +127,14 @@
     #define BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT BOOST_STATIC_ASSERT
 #endif // __clang__
 
-#if defined( BOOST_MSVC ) || defined( __clang__ ) || ( defined( __GNUC__ ) && ( ( ( __GNUC__ * 10 ) + __GNUC_MINOR__ ) >= 45 ) )
+
+#if defined( BOOST_MSVC ) || ( !defined( __clang__ ) && defined( __GNUC__ ) && ( ( ( __GNUC__ * 10 ) + __GNUC_MINOR__ ) >= 45 ) )
     #define BF_VT_REF   &
     #define BF_VT_DEREF *
+    #define BF_FASTCALL_WORKAROUND BF_FASTCALL
+#elif defined( __clang__ )
+    #define BF_VT_REF   * const
+    #define BF_VT_DEREF
     #define BF_FASTCALL_WORKAROUND BF_FASTCALL
 #else
     #define BF_VT_REF   * const
@@ -361,9 +367,9 @@ namespace boost {
       template<>           struct function_return_type<void> { typedef unusable type; };
 
       // Tags used to decide between different types of functions
-      struct function_ptr_tag {};
-      struct function_obj_tag {};
-      struct member_ptr_tag {};
+      struct function_ptr_tag     {};
+      struct function_obj_tag     {};
+      struct member_ptr_tag       {};
       struct function_obj_ref_tag {};
 
       // When functions and function pointers are decorated with exception
@@ -454,6 +460,16 @@ namespace boost {
           hasDefaultAlignement =
             alignment_of<Functor>::value <= alignment_of<double>::value);
       };
+
+      #ifdef _DEBUG
+        template <typename T>
+        void debug_clear( T & target )
+        {    
+            std::memset( &target, 0, sizeof( target ) );
+        }
+      #else
+        template <typename T> void debug_clear( T & ) {}
+      #endif // _DEBUG
 
 
       ///  A helper class that can construct a typed_functor object from a
@@ -553,9 +569,9 @@ namespace boost {
               destroy( in_buffer );
           }
 
-          static void BF_FASTCALL_WORKAROUND destroy( function_buffer & /*buffer*/ )
+          static void BF_FASTCALL_WORKAROUND destroy( function_buffer & buffer )
           {
-              //*functor_ptr( buffer ) = 0;
+              debug_clear( *functor_ptr( buffer ) );
           }
       };
 
@@ -587,9 +603,9 @@ namespace boost {
               destroy( in_buffer );
           }
 
-          static void BF_FASTCALL_WORKAROUND destroy( function_buffer & /*buffer*/ )
+          static void BF_FASTCALL_WORKAROUND destroy( function_buffer & buffer )
           {
-              //std::memset( &buffer, 0, sizeof( buffer ) );
+              debug_clear( buffer );
           }
       };
 
@@ -598,12 +614,12 @@ namespace boost {
       template <typename Allocator>
       struct manager_trivial_heap
       {
-      public:
+      private:
           typedef typename Allocator:: BOOST_NESTED_TEMPLATE rebind<unsigned char>::other trivial_allocator;
 
       public:
-          static void * & functor_ptr( function_buffer       & buffer ) { return buffer.trivial_heap_obj.ptr; }
-          static void *   functor_ptr( function_buffer const & buffer ) { BF_ASSUME( buffer.trivial_heap_obj.ptr ); return functor_ptr( const_cast<function_buffer &>( buffer ) ); }
+          static void       * functor_ptr( function_buffer       & buffer ) { BF_ASSUME( buffer.trivial_heap_obj.ptr ); return buffer.trivial_heap_obj.ptr; }
+          static void const * functor_ptr( function_buffer const & buffer ) { return functor_ptr( const_cast<function_buffer &>( buffer ) ); }
 
           template <typename Functor>
           static void assign( Functor const & functor, function_buffer & out_buffer, Allocator const a )
@@ -635,7 +651,7 @@ namespace boost {
           static void BF_FASTCALL_WORKAROUND move( function_buffer & in_buffer, function_buffer & out_buffer )
           {
               out_buffer.trivial_heap_obj = in_buffer.trivial_heap_obj;
-              //in_buffer.trivial_heap_obj.ptr = 0;
+              debug_clear( in_buffer.trivial_heap_obj );
           }
 
           static void BF_FASTCALL_WORKAROUND destroy( function_buffer & buffer )
@@ -645,7 +661,7 @@ namespace boost {
 
               trivial_allocator a;
               a.deallocate( static_cast<typename trivial_allocator::pointer>( functor_ptr( buffer ) ), buffer.trivial_heap_obj.size );
-              //functor_ptr( buffer ) = 0;
+              debug_clear( buffer.trivial_heap_obj );
           }
       };
 
@@ -680,6 +696,7 @@ namespace boost {
           static void BF_FASTCALL_WORKAROUND destroy( function_buffer & buffer )
           {
               functor_ptr( buffer )->~Functor();
+              debug_clear( *functor_ptr( buffer ) );
           }
       };
 
@@ -696,18 +713,15 @@ namespace boost {
           typedef typename OriginalAllocator:: BOOST_NESTED_TEMPLATE rebind<functor_and_allocator_t>::other wrapper_allocator_t    ;
           typedef typename OriginalAllocator:: BOOST_NESTED_TEMPLATE rebind<OriginalAllocator      >::other allocator_allocator_t  ;
 
-          static functor_and_allocator_t * & functor_ptr( function_buffer & buffer )
+          static functor_and_allocator_t * functor_ptr( function_buffer & buffer )
           {
-              return *static_cast<functor_and_allocator_t * *>
+              return static_cast<functor_and_allocator_t *>
               (
-                  static_cast<void *>
-                  (
-                      &manager_trivial_heap<OriginalAllocator>::functor_ptr( buffer )
-                  )
+                  manager_trivial_heap<OriginalAllocator>::functor_ptr( buffer )
               );
           }
 
-          static functor_and_allocator_t * functor_ptr( function_buffer const & buffer )
+          static functor_and_allocator_t const * functor_ptr( function_buffer const & buffer )
           {
               return functor_ptr( const_cast<function_buffer &>( buffer ) );
           }
@@ -735,7 +749,7 @@ namespace boost {
           static void BF_FASTCALL_WORKAROUND clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
               functor_and_allocator_t const & in_functor_and_allocator( *functor_ptr( in_buffer ) );
-              return assign( in_functor_and_allocator.functor(), out_buffer, in_functor_and_allocator.allocator() );
+              assign( in_functor_and_allocator.functor(), out_buffer, in_functor_and_allocator.allocator() );
           }
 
           static void BF_FASTCALL_WORKAROUND move( function_buffer & in_buffer, function_buffer & out_buffer )
@@ -755,7 +769,7 @@ namespace boost {
               allocator_allocator.destroy( allocator_allocator.address( in_functor_and_allocator.allocator() ) );
 
               full_allocator.deallocate( full_allocator.address( in_functor_and_allocator ) );
-              //functor_ptr( buffer ) = 0;
+              debug_clear( buffer );
           }
 
         private:
@@ -776,7 +790,8 @@ namespace boost {
               source_allocator   .construct( p_functor_placeholder  , functor          );
               allocator_allocator.construct( p_allocator_placeholder, source_allocator );
 
-              functor_ptr( out_buffer ) = release( p_placeholder );
+              //...zzz...functor_ptr( out_buffer ) = release( p_placeholder );
+              out_buffer.trivial_heap_obj.ptr = release( p_placeholder );
           }
       };
 
@@ -1069,12 +1084,7 @@ private: // Private helper guard classes.
   class safe_mover;
 
 public:
-    function_base( detail::function::vtable const & vtable ) : pVTable( &vtable )
-    {
-        #ifdef _DEBUG
-            std::memset( &this->functor, 0, sizeof( this->functor ) );
-        #endif // _DEBUG
-    }
+    function_base( detail::function::vtable const & vtable ) : pVTable( &vtable ) { detail::function::debug_clear( this->functor ); }
     ~function_base() { destroy(); }
 
   template <class EmptyHandler>
@@ -1083,7 +1093,7 @@ public:
 #ifndef BOOST_FUNCTION_NO_RTTI
 
   /// Retrieve the type of the stored function object.
-  const detail::sp_typeinfo& target_type() const
+  detail::sp_typeinfo const & target_type() const
   {
     return get_vtable().get_typed_functor( this->functor ).functor_type_info();
   }
@@ -1140,14 +1150,13 @@ public:
 
 #endif // BOOST_FUNCTION_NO_RTTI
 
-public: // should be protected, but GCC 2.95.3 will fail to allow access
+protected:
   detail::function::vtable const & get_vtable() const
   {
       BF_ASSUME( pVTable );
       return *pVTable;
   }
 
-protected:
   template <class EmptyHandler>
   BF_NOTHROW
   void clear( detail::function::vtable const & empty_handler_vtable )
