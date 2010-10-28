@@ -185,8 +185,8 @@ namespace boost {
             template <class Other>
             bool operator==( fallocator<Other> const & ) const { return true; }
 
-            template <typename T>
-            static T * address( T & value ) { return boost::addressof( value ); }
+            template <typename TT>
+            static TT * address( TT & value ) { return boost::addressof( value ); }
 
             pointer allocate  ( size_type const count, void const * /*p_hint*/ ) { return allocate( count ); }
             pointer allocate  ( size_type const count                          ) { return static_cast<pointer>( ::operator new( count * sizeof( T ) ) ); }
@@ -405,7 +405,9 @@ namespace boost {
       template <typename F>
       class get_function_tag
       {
-        typedef typename mpl::if_c<(is_pointer<F>::value || is_msvc_exception_specified_function_pointer<F>::value),
+        typedef typename mpl::if_c<(is_pointer<F>::value ||
+                                   is_function<F>::value ||
+                                   is_msvc_exception_specified_function_pointer<F>::value),
                                    function_ptr_tag,
                                    function_obj_tag>::type ptr_or_obj_tag;
 

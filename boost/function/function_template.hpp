@@ -576,29 +576,29 @@ private:
     // ...direct actually means whether to skip pre-destruction (when not
     // assigning but constructing) so it should probably be renamed to
     // pre_destroy or the whole thing solved in some smarter way...
-    template<bool direct, typename FunctionObj, typename Allocator>
+    template <bool direct, typename FunctionObj, typename Allocator>
     void do_assign( FunctionObj const & f, Allocator const a )
     {
         typedef typename detail::function::get_function_tag<FunctionObj>::type tag;
         dispatch_assign<direct, FunctionObj>( f, a, tag() );
     }
 
-    template<bool direct, typename FunctionObj>
+    template <bool direct, typename FunctionObj>
     void do_assign( FunctionObj const & f ) { do_assign<direct>( f, detail::function::fallocator<FunctionObj>() ); }
 
-    template<bool direct, typename FunctionObj, typename Allocator>
+    template <bool direct, typename FunctionObj, typename Allocator>
     void dispatch_assign( FunctionObj const & f, Allocator const a, detail::function::function_obj_tag     ) { do_assign<direct, FunctionObj>( f      ,        f   , a ); }
-    template<bool direct, typename FunctionObj, typename Allocator>
-    void dispatch_assign( FunctionObj const & f, Allocator const a, detail::function::function_ptr_tag     ) { do_assign<direct, FunctionObj>( f      ,        f   , a ); }
+    template <bool direct, typename FunctionObj, typename Allocator> // This one has to be exactly as it is for GCC and Clang...:
+    void dispatch_assign( FunctionObj const   f, Allocator const a, detail::function::function_ptr_tag     ) { do_assign<direct             >( f      ,        f   , a ); }
     // DPG TBD: Add explicit support for member function
     // objects, so we invoke through mem_fn() but we retain the
     // right target_type() values.
-    template<bool direct, typename FunctionObj, typename Allocator>
+    template <bool direct, typename FunctionObj, typename Allocator>
     void dispatch_assign( FunctionObj const & f, Allocator const a, detail::function::member_ptr_tag       ) { do_assign<direct, FunctionObj>( f      , mem_fn( f ), a ); }
-    template<bool direct, typename FunctionObj, typename Allocator>
+    template <bool direct, typename FunctionObj, typename Allocator>
     void dispatch_assign( FunctionObj const & f, Allocator const a, detail::function::function_obj_ref_tag ) { do_assign<direct, typename FunctionObj::type>( f.get(),         f  , a ); }
 
-    template<bool direct, typename ActualFunctor, typename StoredFunctor, typename ActualFunctorAllocator>
+    template <bool direct, typename ActualFunctor, typename StoredFunctor, typename ActualFunctorAllocator>
     void do_assign( ActualFunctor const & original_functor, StoredFunctor const & stored_functor, ActualFunctorAllocator const a )
     {
         if
