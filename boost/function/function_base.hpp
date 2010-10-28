@@ -185,8 +185,8 @@ namespace boost {
             template <class Other>
             bool operator==( fallocator<Other> const & ) const { return true; }
 
-            static pointer       address( reference       value ) { return boost::addressof( value ); }
-            static const_pointer address( const_reference value ) { return boost::addressof( value ); }
+            template <typename T>
+            static T * address( T & value ) { return boost::addressof( value ); }
 
             pointer allocate  ( size_type const count, void const * /*p_hint*/ ) { return allocate( count ); }
             pointer allocate  ( size_type const count                          ) { return static_cast<pointer>( ::operator new( count * sizeof( T ) ) ); }
