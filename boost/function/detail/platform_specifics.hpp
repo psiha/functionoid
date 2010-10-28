@@ -46,6 +46,9 @@ namespace detail
 
     #define BF_FORCEINLINE __forceinline
     #define BF_NOINLINE    __declspec( noinline )
+    #define BF_NORETURN    __declspec( noreturn )
+
+    #define BF_HAS_NORETURN
 
     #define BF_OVERRIDE override
     #define BF_SEALED   sealed
@@ -81,6 +84,9 @@ namespace detail
         #define BF_FORCEINLINE __attribute__(( always_inline ))
     #endif
     #define BF_NOINLINE __attribute__(( noinline ))
+    #define BF_NORETURN __attribute__(( noreturn ))
+
+    #define BF_HAS_NORETURN
 
     #define BF_OVERRIDE
     #define BF_SEALED

@@ -1029,6 +1029,22 @@ namespace boost {
           ,BF_VT_DEREF &Manager::get_typed_functor
         #endif // BOOST_FUNCTION_NO_RTTI
       };
+
+
+      template <typename T>
+      T get_default_value( mpl::false_ /*not a reference type*/ ) { return T(); }
+
+      template <>
+      inline void get_default_value<void>( mpl::false_ /*not a reference type*/ ) {}
+
+      template <typename T>
+      T get_default_value( mpl::true_ /*a reference type*/ )
+      {
+          BF_UNREACHABLE_CODE
+          typedef typename remove_reference<T>::type actual_type_t;
+          static T invalid_reference( *static_cast<actual_type_t *>( 0 ) );
+          return invalid_reference;
+      }
     } // end namespace function
   } // end namespace detail
 
@@ -1062,7 +1078,7 @@ private: // Private helper guard classes.
 
       ~cleaner() { conditional_clear( pFunction_ != 0 ); }
 
-      void cancel() { assert( pFunction_ ); pFunction_ = 0; }
+      void cancel() { BOOST_ASSERT( pFunction_ ); pFunction_ = 0; }
 
   private:
       void conditional_clear( bool const clear )
@@ -1375,26 +1391,18 @@ public:
 class throw_on_empty
 {
 private:
-    #ifdef BOOST_MSVC
-        __declspec( noinline noreturn )
-    #else
-        BF_NOINLINE
-    #endif // BOOST_MSVC
-    static void throw_bad_call()
+    static void BF_NORETURN throw_bad_call()
     {
         boost::throw_exception( bad_function_call() );
     }
 
 public:
     template <class result_type>
-    #ifdef BOOST_MSVC
-        __declspec( noreturn )
-    #endif // BOOST_MSVC
     static result_type handle_empty_invoke()
     {
         throw_bad_call();
-        #ifndef BOOST_MSVC
-            return result_type();
+        #ifndef BF_HAS_NORETURN
+            return get_default_value<result_type>( is_reference<result_type>() );
         #endif // BOOST_MSVC
     }
 };
