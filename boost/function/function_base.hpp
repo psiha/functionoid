@@ -450,9 +450,8 @@ namespace boost {
           allowsSmallObjectOptimization =
             is_msvc_exception_specified_function_pointer<Functor>::value                   ||
             (
-              ( sizeof( Functor ) <= sizeof( function_buffer ) )                           &&
-              ( alignment_of<function_buffer>::value % alignment_of<Functor>::value == 0 ) &&
-                allowsPODOptimization
+              ( sizeof( Functor ) <= sizeof( function_buffer )                           ) &&
+              ( alignment_of<function_buffer>::value % alignment_of<Functor>::value == 0 )
             ));
 
           BOOST_STATIC_CONSTANT
@@ -460,9 +459,8 @@ namespace boost {
           allowsPtrObjectOptimization =
             is_msvc_exception_specified_function_pointer<Functor>::value          ||
             (
-              ( sizeof( Functor ) <= sizeof( void * )                             &&
-              ( alignment_of<void *>::value % alignment_of<Functor>::value == 0 ) &&
-                allowsPODOptimization)
+              ( sizeof( Functor ) <= sizeof( void * )                           ) &&
+              ( alignment_of<void *>::value % alignment_of<Functor>::value == 0 )
             ));
 
           BOOST_STATIC_CONSTANT
@@ -570,7 +568,7 @@ namespace boost {
           static void BF_FASTCALL_WORKAROUND clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
 		      //...zzz...even with BF_ASSUME MSVC still generates branching code...
-              //return assign( *functor_ptr( in_buffer ), out_buffer, dummy_allocator() );
+              //assign( *functor_ptr( in_buffer ), out_buffer, dummy_allocator() );
               out_buffer.obj_ptr = in_buffer.obj_ptr;
           }
 
@@ -605,7 +603,7 @@ namespace boost {
 
           static void BF_FASTCALL_WORKAROUND clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
-              return assign( in_buffer, out_buffer, dummy_allocator() );
+              assign( in_buffer, out_buffer, dummy_allocator() );
           }
 
           static void BF_FASTCALL_WORKAROUND move( function_buffer & in_buffer, function_buffer & out_buffer )
@@ -647,7 +645,7 @@ namespace boost {
               function_buffer in_buffer;
               in_buffer.trivial_heap_obj.ptr  = const_cast<Functor *>( &functor );
               in_buffer.trivial_heap_obj.size = sizeof( Functor );
-              return clone( in_buffer, out_buffer );
+              clone( in_buffer, out_buffer );
           }
 
           static void BF_FASTCALL_WORKAROUND clone( function_buffer const & in_buffer, function_buffer & out_buffer )
@@ -686,7 +684,8 @@ namespace boost {
           static Functor       * functor_ptr( function_buffer       & buffer ) { return static_cast<Functor *>( manager_trivial_small::functor_ptr( buffer ) ); }
           static Functor const * functor_ptr( function_buffer const & buffer ) { return functor_ptr( const_cast<function_buffer &>( buffer ) ); }
 
-          static void assign( Functor const & functor, function_buffer & out_buffer )
+          template <typename Allocator>
+          static void assign( Functor const & functor, function_buffer & out_buffer, Allocator )
           {
               new ( functor_ptr( out_buffer ) ) Functor( functor );
           }
@@ -694,7 +693,7 @@ namespace boost {
           static void BF_FASTCALL_WORKAROUND clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
               Functor const & in_functor( *functor_ptr( in_buffer ) );
-              return assign( in_functor, out_buffer );
+              assign( in_functor, out_buffer, dummy_allocator() );
           }
 
           static void BF_FASTCALL_WORKAROUND move( function_buffer & in_buffer, function_buffer & out_buffer )
@@ -1090,10 +1089,15 @@ private: // Private helper guard classes.
               BOOST_ASSERT( pFunction_ );
               typedef          functor_traits     <EmptyHandler>                                  empty_handler_traits ;
               typedef typename get_functor_manager<EmptyHandler, fallocator<EmptyHandler> >::type empty_handler_manager;
-              // remove completely or replace with a simple is_stateless<>?
+              //...zzz..remove completely or replace with a simple is_stateless<>?
               BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT
               (
-                empty_handler_traits::allowsPODOptimization &&
+                // Implementation note:
+                //   POD optimization detection erroneously fails on older GCCs
+                // (GCC 4.2.1) so it must be ignored. This is safe for now as
+                // the code supports this.
+                //                            (28.10.2010.) (Domagoj Saric)
+                //empty_handler_traits::allowsPODOptimization &&
                 empty_handler_traits::allowsSmallObjectOptimization
               );
               empty_handler_manager::assign( EmptyHandler(), pFunction_->functor_, fallocator<EmptyHandler>() );
@@ -1577,24 +1581,11 @@ template<typename Functor>
 
 namespace detail {
   namespace function {
+
     BOOST_FUNCTION_ENABLE_IF_FUNCTION
     inline has_empty_target( Function const * const f )
     {
-      return f->empty();
-    }
-
-    template <class FunctionObj>
-    inline bool has_empty_target( reference_wrapper<FunctionObj> const * const f )
-    {
-        // Implementation note:
-        //   We save/assign a reference to a boost::function even if it is empty
-        // and let the referenced function handle a possible empty invocation.
-        //                                    (28.10.2010.) (Domagoj Saric)
-        BF_ASSUME( f                != 0 );
-        BF_ASSUME( f->get_pointer() != 0 );
-        return is_base_of<function_base, FunctionObj>::value
-                ? ( f == 0 )
-                : has_empty_target( f->get_pointer() );
+        return f->empty();
     }
 
     template <class FunctionPtr>
@@ -1617,7 +1608,25 @@ namespace detail {
     //inline bool has_empty_target(...)
     inline bool has_empty_target( void const * )
     {
-      return false;
+        return false;
+    }
+
+    // Implementation note:
+    //   This has to be after the void const * overload because of non-lazy
+    // compilers (e.g. GCC 4.2.1).
+    //                                        (28.10.2010.) (Domagoj Saric)
+    template <class FunctionObj>
+    inline bool has_empty_target( reference_wrapper<FunctionObj> const * const f )
+    {
+        // Implementation note:
+        //   We save/assign a reference to a boost::function even if it is empty
+        // and let the referenced function handle a possible empty invocation.
+        //                                    (28.10.2010.) (Domagoj Saric)
+        BF_ASSUME( f                != 0 );
+        BF_ASSUME( f->get_pointer() != 0 );
+        return is_base_of<function_base, FunctionObj>::value
+            ? ( f == 0 )
+            : has_empty_target( f->get_pointer() );
     }
 
     /* Just an experiment to show how can the current boost::mem_fn implementation
@@ -1669,9 +1678,11 @@ void function_base::assign
     }
     else
     {
-        // This can/should be rewritten because the small-object-optimization
-        // condition is too strict (requires a trivial destructor which is not
-        // needed for a no fail assignment).
+        /// \todo This can/should be rewritten because the
+        /// small-object-optimization condition is too strict, even heap
+        /// allocated targets can be assigned directly because they have a
+        /// nothrow swap operation..
+        ///                                   (28.10.2010.) (Domagoj Saric)
         typedef mpl::bool_
         <
             ::boost::type_traits::ice_and
