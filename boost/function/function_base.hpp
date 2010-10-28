@@ -779,7 +779,7 @@ namespace boost {
               original_allocator .destroy( original_allocator .address( in_functor_and_allocator.functor  () ) );
               allocator_allocator.destroy( allocator_allocator.address( in_functor_and_allocator.allocator() ) );
 
-              full_allocator.deallocate( full_allocator.address( in_functor_and_allocator ) );
+              full_allocator.deallocate( full_allocator.address( in_functor_and_allocator ), 1 );
               debug_clear( buffer );
           }
 
