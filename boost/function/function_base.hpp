@@ -1588,9 +1588,9 @@ namespace detail {
         //                                    (28.10.2010.) (Domagoj Saric)
         BF_ASSUME( f                != 0 );
         BF_ASSUME( f->get_pointer() != 0 );
-        return is_base_of<function_base, Function>::value
-                ? return ( f == 0 )
-                : return has_empty_target( f->get_pointer() );
+        return is_base_of<function_base, FunctionObj>::value
+                ? ( f == 0 )
+                : has_empty_target( f->get_pointer() );
     }
 
     template <class FunctionPtr>
