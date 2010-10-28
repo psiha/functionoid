@@ -248,7 +248,17 @@ namespace boost {
 
     BOOST_FUNCTION_FUNCTION() : function_base( empty_handler_vtable() )
     {
-        BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT( is_stateless<base_empty_handler>::value );
+        // Implementation note:
+        //   The condition is relaxed for Clang and older GCC that simply seem
+        // to have a broken is_statless<> implementation. This should be (more
+        // than) safe, for now, because the current code works (or should work)
+        // even with non-stateless empty handlers.
+        //                                    (28.10.2010.) (Domagoj Saric)
+        #if BOOST_WORKAROUND(BOOST_MSVC, >= 1500)
+            BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT( is_stateless<base_empty_handler>::value );
+        #else
+            BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT( is_empty<base_empty_handler>::value );
+        #endif // BOOST_MSVC
     }
 
     // MSVC chokes if the following two constructors are collapsed into
