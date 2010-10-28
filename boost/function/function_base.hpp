@@ -158,28 +158,34 @@ namespace boost {
             template <class Other>
             struct rebind { typedef fallocator<Other> other; };
 
+            //...zzz...the two constructors make it non-stateless...
             fallocator() {}
 
-            template <class Other>
-            fallocator( fallocator<Other> const & ) {}
-
-            static pointer       address( reference       value ) { return addressof( value ); }
-            static const_pointer address( const_reference value ) { return addressof( value ); }
+            template <class Other> fallocator( fallocator<Other> const & ) {}
 
             template <class Other>
-            fallocator<Other> & operator=( fallocator<Other> const & ) { return *this; }
+            fallocator & operator=( fallocator<Other> const & ) { return *this; }
+
+            template <class Other>
+            bool operator==( fallocator<Other> const & ) const { return true; }
+
+            static pointer       address( reference       value ) { return boost::addressof( value ); }
+            static const_pointer address( const_reference value ) { return boost::addressof( value ); }
 
             pointer allocate  ( size_type const count, void const * /*p_hint*/ ) { return allocate( count ); }
-            pointer allocate  ( size_type const count                          ) { return ::operator new( count * sizeof( T ) ); }
-            void    deallocate( pointer   const ptr  , size_type const /*count*/ ) { ::operator delete( ptr ); }
+            pointer allocate  ( size_type const count                          ) { return static_cast<pointer>( ::operator new( count * sizeof( T ) ) ); }
+            void    deallocate( pointer   const ptr  , size_type /*count*/     ) { deallocate( ptr ); }
+            void    deallocate( pointer   const ptr                            ) { ::operator delete( ptr ); }
 
             void construct( pointer const ptr, T const & source ) { new ( ptr ) T( source ); }
-            void destroy  ( pointer const ptr                   ) { ptr->~T(); }
+            void destroy  ( pointer const ptr                   ) { ptr->~T(); ignore_unused_variable_warning( ptr ); }
 
             static size_type max_size() { return (std::numeric_limits<size_type>::max)() / sizeof( T ); }
         };
 
         typedef fallocator<void *> dummy_allocator;
+
+        //...zzz...BOOST_STATIC_ASSERT( is_stateless<dummy_allocator>::value );
 
         struct thiscall_optimization_available_helper
         {
@@ -210,10 +216,10 @@ namespace boost {
           template <typename Functor>
           typed_functor( Functor & functor )
               :
-              pFunctor          ( addressof      ( functor )  ),
-              type_id           ( BOOST_SP_TYPEID( Functor )  ),
-              const_qualified   ( is_const   <Functor>::value ),
-              volatile_qualified( is_volatile<Functor>::value )
+              pFunctor          ( boost::addressof( functor )  ),
+              type_id           ( BOOST_SP_TYPEID( Functor )   ),
+              const_qualified   ( is_const   <Functor>::value  ),
+              volatile_qualified( is_volatile<Functor>::value  )
           {
               BOOST_ASSERT( pFunctor );
           }
@@ -288,7 +294,7 @@ namespace boost {
         struct trivial_heap_obj_t
         {
             void        * ptr;
-            std::size_t   size; // in number of allocation atoms
+            std::size_t   size; // in number of bytes
         } trivial_heap_obj;
 
         // For function pointers of all kinds
@@ -380,7 +386,7 @@ namespace boost {
           >
       {};
 
-      template<typename F>
+      template <typename F>
       class get_function_tag
       {
         typedef typename mpl::if_c<(is_pointer<F>::value || is_msvc_exception_specified_function_pointer<F>::value),
@@ -405,14 +411,13 @@ namespace boost {
       {
         functor_and_allocator( F const & f, A a ) : F( f ), A( a ) {}
 
-        F & functor  () { return *this; }
-        A & allocator() { return *this; }
+        F       & functor  ()       { return *this; }
+        F const & functor  () const { return *this; }
+        A       & allocator()       { return *this; }
+        A const & allocator() const { return *this; }
       };
 
-
-      typedef boost::aligned_storage<sizeof( void * ) * 2, sizeof( void * ) * 2>::type trivial_heap_storage_atom;
-
-      template<typename Functor>
+      template <typename Functor>
       struct functor_traits
       {
           BOOST_STATIC_CONSTANT
@@ -447,7 +452,7 @@ namespace boost {
           BOOST_STATIC_CONSTANT
           (bool,
           hasDefaultAlignement =
-            alignment_of<Functor>::value == alignment_of<trivial_heap_storage_atom>::value);
+            alignment_of<Functor>::value <= alignment_of<double>::value);
       };
 
 
@@ -525,8 +530,8 @@ namespace boost {
       struct manager_ptr
       {
       public:
-          static void       *       * functor_ptr( function_buffer       & buffer ) { return &buffer.obj_ptr; }
-          static void const * const * functor_ptr( function_buffer const & buffer ) { BF_ASSUME( buffer.obj_ptr ); return functor_ptr( const_cast<function_buffer &>( buffer ) ); }
+          static void       *       * functor_ptr( function_buffer       & buffer ) {                              return &buffer.obj_ptr; }
+          static void const * const * functor_ptr( function_buffer const & buffer ) { BF_ASSUME( buffer.obj_ptr ); return &buffer.obj_ptr; }
 
           template <typename Functor, typename Allocator>
           static void assign( Functor const & functor, function_buffer & out_buffer, Allocator )
@@ -537,7 +542,9 @@ namespace boost {
 
           static void BF_FASTCALL_WORKAROUND clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
-              return assign( *functor_ptr( in_buffer ), out_buffer, dummy_allocator() );
+		      //...zzz...even with BF_ASSUME MSVC still generates branching code...
+              //return assign( *functor_ptr( in_buffer ), out_buffer, dummy_allocator() );
+              out_buffer.obj_ptr = in_buffer.obj_ptr;
           }
 
           static void BF_FASTCALL_WORKAROUND move( function_buffer & in_buffer, function_buffer & out_buffer )
@@ -633,8 +640,11 @@ namespace boost {
 
           static void BF_FASTCALL_WORKAROUND destroy( function_buffer & buffer )
           {
+              BOOST_ASSERT( buffer.trivial_heap_obj.ptr  );
+              BOOST_ASSERT( buffer.trivial_heap_obj.size );
+
               trivial_allocator a;
-              a.deallocate( functor_ptr( buffer ) );
+              a.deallocate( static_cast<typename trivial_allocator::pointer>( functor_ptr( buffer ) ), buffer.trivial_heap_obj.size );
               //functor_ptr( buffer ) = 0;
           }
       };
@@ -722,18 +732,18 @@ namespace boost {
               assign_aux<guard_t>( functor, out_buffer, source_allocator );
           }
 
-          static void clone( function_buffer const & in_buffer, function_buffer & out_buffer )
+          static void BF_FASTCALL_WORKAROUND clone( function_buffer const & in_buffer, function_buffer & out_buffer )
           {
               functor_and_allocator_t const & in_functor_and_allocator( *functor_ptr( in_buffer ) );
               return assign( in_functor_and_allocator.functor(), out_buffer, in_functor_and_allocator.allocator() );
           }
 
-          static void move( function_buffer & in_buffer, function_buffer & out_buffer )
+          static void BF_FASTCALL_WORKAROUND move( function_buffer & in_buffer, function_buffer & out_buffer )
           {
               manager_trivial_heap<OriginalAllocator>::move( in_buffer, out_buffer );
           }
 
-          static void destroy( function_buffer & buffer )
+          static void BF_FASTCALL_WORKAROUND destroy( function_buffer & buffer )
           {
               functor_and_allocator_t & in_functor_and_allocator( *functor_ptr( buffer ) );
 
@@ -741,10 +751,10 @@ namespace boost {
               allocator_allocator_t allocator_allocator( in_functor_and_allocator.allocator() );
               wrapper_allocator_t   full_allocator     ( in_functor_and_allocator.allocator() );
 
-              original_allocator .destroy( &in_functor_and_allocator.functor  () );
-              allocator_allocator.destroy( &in_functor_and_allocator.allocator() );
+              original_allocator .destroy( original_allocator .address( in_functor_and_allocator.functor  () ) );
+              allocator_allocator.destroy( allocator_allocator.address( in_functor_and_allocator.allocator() ) );
 
-              full_allocator.deallocate( &in_functor_and_allocator );
+              full_allocator.deallocate( full_allocator.address( in_functor_and_allocator ) );
               //functor_ptr( buffer ) = 0;
           }
 
@@ -760,8 +770,8 @@ namespace boost {
               allocator_allocator_t allocator_allocator( source_allocator );
 
               Guard                         p_placeholder          ( full_allocator.allocate( 1 ) );
-              Functor               * const p_functor_placeholder  ( p_placeholder                );
-              OriginalAllocator     * const p_allocator_placeholder( p_placeholder                );
+              Functor               * const p_functor_placeholder  ( get_pointer( p_placeholder ) );
+              OriginalAllocator     * const p_allocator_placeholder( get_pointer( p_placeholder ) );
 
               source_allocator   .construct( p_functor_placeholder  , functor          );
               allocator_allocator.construct( p_allocator_placeholder, source_allocator );
@@ -788,7 +798,13 @@ namespace boost {
       template <typename Functor, typename Allocator>
       struct functor_manager<Functor, Allocator, true, false, false, true>
       {
-          typedef manager_trivial_heap<Allocator> type;
+          typedef typename mpl::if_
+          <
+            //...zzz...is_stateless<Allocator>,
+            is_empty<Allocator>,
+            manager_trivial_heap<         Allocator>,
+            manager_generic     <Functor, Allocator>
+          >::type type;
       };
 
       template <typename Functor, typename Allocator, bool defaultAligned>
@@ -955,23 +971,6 @@ namespace boost {
 
       #endif // BOOST_FUNCTION_NO_RTTI
 
-
-/*    ALLOCATOR SUPPORT TEMPORARILY COMMENTED OUT
-          template<typename FunctionObj,typename Allocator>
-          void 
-          assign_functor_a(FunctionObj f, function_buffer& functor, Allocator a, mpl::false_) const
-          {
-              typedef functor_wrapper<FunctionObj,Allocator> functor_wrapper_type;
-              typedef typename Allocator::template rebind<functor_wrapper_type>::other
-                  wrapper_allocator_type;
-              typedef typename wrapper_allocator_type::pointer wrapper_allocator_pointer_type;
-              wrapper_allocator_type wrapper_allocator(a);
-              wrapper_allocator_pointer_type copy = wrapper_allocator.allocate(1);
-              wrapper_allocator.construct(copy, functor_wrapper_type(f,a));
-              functor_wrapper_type* new_f = static_cast<functor_wrapper_type*>(copy);
-              functor.obj_ptr = new_f;
-          }
-*/
       };
 
       template <class Invoker, class Manager>
@@ -1070,7 +1069,12 @@ private: // Private helper guard classes.
   class safe_mover;
 
 public:
-    function_base( detail::function::vtable const & vtable ) : pVTable( &vtable ) { }
+    function_base( detail::function::vtable const & vtable ) : pVTable( &vtable )
+    {
+        #ifdef _DEBUG
+            std::memset( &this->functor, 0, sizeof( this->functor ) );
+        #endif // _DEBUG
+    }
     ~function_base() { destroy(); }
 
   template <class EmptyHandler>
@@ -1157,13 +1161,14 @@ protected:
         emptyHandler,
         empty_handler_vtable,
         empty_handler_vtable, 
-        detail::function::fallocator<EmptyHandler>()
+        detail::function::fallocator<EmptyHandler>(),
+        mpl::false_()
       );
   }
 
 private: // Assignment from another boost function helpers.
   BF_NOINLINE
-  void assign_direct( function_base const & source )
+  void assign_boost_function_direct( function_base const & source )
   {
       source.pVTable->clone( source.functor, this->functor );
       pVTable = source.pVTable;
@@ -1171,24 +1176,24 @@ private: // Assignment from another boost function helpers.
 
   template <class EmptyHandler>
   BF_NOINLINE
-  void assign_guarded( function_base const & source, detail::function::vtable const & empty_handler_vtable )
+  void assign_boost_function_guarded( function_base const & source, detail::function::vtable const & empty_handler_vtable )
   {
       this->destroy();
       cleaner<EmptyHandler> guard( *this, empty_handler_vtable );
-      assign_direct( source );
+      assign_boost_function_direct( source );
       guard.cancel();
   }
 
 protected:
   // Assignment from another boost function.
   template <bool direct, typename EmptyHandler, typename FunctionObj, typename Allocator>
-  typename enable_if<is_base_of<function_base, FunctionObj> >::type
-  assign
+  void assign
   (
-    FunctionObj const & f,
+    FunctionObj              const & f,
     detail::function::vtable const & functor_vtable,
     detail::function::vtable const & empty_handler_vtable,
-    Allocator
+    Allocator,
+    mpl::true_ /*assignment of an instance of the same boost::function<> instantiation*/
   )
   {
     BOOST_ASSERT( &functor_vtable == f.pVTable );
@@ -1197,23 +1202,23 @@ protected:
     {
         BOOST_ASSERT( &static_cast<function_base const &>( f ) != this );
         BOOST_ASSERT( this->pVTable == &empty_handler_vtable );
-        assign_direct( f );
+        assign_boost_function_direct( f );
     }
     else if( &static_cast<function_base const &>( f ) != this )
     {
-        assign_guarded<EmptyHandler>( f, empty_handler_vtable );
+        assign_boost_function_guarded<EmptyHandler>( f, empty_handler_vtable );
     }
   }
 
   // General actual assignment.
   template <bool direct, typename EmptyHandler, typename FunctionObj, typename Allocator>
-  typename disable_if<is_base_of<function_base, FunctionObj> >::type
-  assign
+  void assign
   (
-    FunctionObj const & f,
+    FunctionObj              const & f,
     detail::function::vtable const & functor_vtable,
     detail::function::vtable const & empty_handler_vtable,
-    Allocator
+    Allocator,
+    mpl::false_ /*generic assign*/
   );
 
   template <typename EmptyHandler, typename FunctionObj, typename Allocator>
@@ -1549,7 +1554,9 @@ namespace detail {
     template <class FunctionPtr>
     inline bool has_empty_target( reference_wrapper<FunctionPtr> const * const f )
     {
-        return has_empty_target( f->get_pointer() );
+        //...zzz...return has_empty_target( f->get_pointer() );
+        BF_ASSUME( f->get_pointer() != 0 );
+        return f == 0;
     }
 
     template <class FunctionPtr>
@@ -1566,7 +1573,7 @@ namespace detail {
     }
 
 #ifdef BOOST_MSVC // MSVC (9.0 SP1 and prior) cannot inline vararg functions
-    inline bool has_empty_target(const void*)
+    inline bool has_empty_target( void const * )
 #else
     inline bool has_empty_target(...)
 #endif
@@ -1599,13 +1606,13 @@ namespace detail {
 
 //...zzz...here because of has_empty_target()...GCC & Clang are not lazy enough
 template <bool direct, typename EmptyHandler, typename FunctionObj, typename Allocator>
-typename disable_if<is_base_of<function_base, FunctionObj> >::type
-function_base::assign
+void function_base::assign
 (
     FunctionObj              const & f,
     detail::function::vtable const & functor_vtable,
     detail::function::vtable const & empty_handler_vtable,
-    Allocator                const   a
+    Allocator                const   a,
+    mpl::false_ /*generic assign*/
 )
 {
     using namespace detail::function;
