@@ -137,6 +137,9 @@ namespace boost {
   <
     typename R BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_PARMS,
     class PolicyList
+    #if ( BOOST_FUNCTION_MAX_ARGS > 10 )
+        = default_policies //...zzz...this causes hoards of warnings...
+    #endif // BOOST_FUNCTION_MAX_ARGS > 10
   >
   class BOOST_FUNCTION_FUNCTION : public function_base
 
@@ -598,7 +601,8 @@ private:
                 emptyHandler,
                 empty_handler_vtable(),
                 empty_handler_vtable(),
-                detail::function::fallocator<base_empty_handler>()
+                detail::function::fallocator<base_empty_handler>(),
+                mpl::false_() /*not assigning another boost::function*/
             );
             emptyHandler. BOOST_NESTED_TEMPLATE handle_empty_invoke<R>();
         }
@@ -610,7 +614,8 @@ private:
                 stored_functor,
                 vtable_for_functor<StoredFunctorAllocator, ActualFunctor>( stored_functor ),
                 empty_handler_vtable(),
-                StoredFunctorAllocator( a )
+                StoredFunctorAllocator( a ),
+                is_base_of<BOOST_FUNCTION_FUNCTION, StoredFunctor>() /*are we assigning another boost::function*/
             );
         }
     }
