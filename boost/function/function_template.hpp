@@ -246,7 +246,7 @@ namespace boost {
 
   public: // Public function interface.
 
-    BOOST_FUNCTION_FUNCTION() : function_base( empty_handler_vtable() )
+    BOOST_FUNCTION_FUNCTION() : function_base( empty_handler_vtable(), base_empty_handler() )
     {
         // Implementation note:
         //   The condition is relaxed for Clang and older GCC that simply seem
@@ -275,7 +275,7 @@ namespace boost {
         #endif // BOOST_NO_SFINAE
     )
       :
-      function_base( empty_handler_vtable() )
+      function_base( empty_handler_vtable(), base_empty_handler() )
     {
       this->do_assign<true, Functor>( f );
     }
@@ -293,22 +293,22 @@ namespace boost {
         #endif // BOOST_NO_SFINAE
     )
       :
-      function_base( empty_handler_vtable() )
+      function_base( empty_handler_vtable(), base_empty_handler() )
     {
       this->do_assign<true, Functor>( f, a );
     }
 
 
 #ifndef BOOST_NO_SFINAE
-    BOOST_FUNCTION_FUNCTION(clear_type*) : function_base( empty_handler_vtable() ) { }
+    BOOST_FUNCTION_FUNCTION(clear_type*) : function_base( empty_handler_vtable(), base_empty_handler() ) { }
 #else
-    BOOST_FUNCTION_FUNCTION(int zero) : function_base( empty_handler_vtable() )
+    BOOST_FUNCTION_FUNCTION(int zero) : function_base( empty_handler_vtable(), base_empty_handler() )
     {
       BOOST_ASSERT(zero == 0);
     }
 #endif
 
-    BOOST_FUNCTION_FUNCTION(const BOOST_FUNCTION_FUNCTION& f) : function_base( empty_handler_vtable() )
+    BOOST_FUNCTION_FUNCTION(const BOOST_FUNCTION_FUNCTION& f) : function_base( empty_handler_vtable(), base_empty_handler() )
     {
       this->do_assign<true>( f );
     }
@@ -319,7 +319,7 @@ namespace boost {
     /// Clear out a target (replace it with an empty handler), if there is one.
     void clear()
     {
-        function_base::clear<base_empty_handler>( empty_handler_vtable() );
+        function_base::clear<false, base_empty_handler>( empty_handler_vtable() );
     }
 
     template<typename FunctionObj>
@@ -424,7 +424,7 @@ namespace boost {
     }
 #endif
 
-    void swap(BOOST_FUNCTION_FUNCTION& other)
+    void swap( BOOST_FUNCTION_FUNCTION & other )
     {
         BOOST_STATIC_ASSERT( sizeof( BOOST_FUNCTION_FUNCTION ) == sizeof( function_base ) );
         return function_base::swap<base_empty_handler>( other, empty_handler_vtable() );
