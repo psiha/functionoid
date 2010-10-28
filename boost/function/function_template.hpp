@@ -304,7 +304,7 @@ namespace boost {
     }
 
     /// Determine if the function is empty (i.e., has empty target).
-    bool empty() const { return pVTable == &empty_handler_vtable(); }
+    bool empty() const { return p_vtable_ == &empty_handler_vtable(); }
 
     /// Clear out a target (replace it with an empty handler), if there is one.
     void clear()
@@ -359,6 +359,10 @@ namespace boost {
 */
     }
 
+    // Implementation note:
+    //   GCC 4.5.1 makes an IMO poor judgment of not inlining this with -Os.
+    //                                        (28.10.2010.) (Domagoj Saric)
+    BF_FORCEINLINE
     result_type operator()(BOOST_FUNCTION_PARMS) const
     {
         return invoke( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA nothrow_policy() );
@@ -488,13 +492,13 @@ private:
     result_type do_invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::true_ /*this call*/ ) const
     {
         typedef result_type (detail::function::function_buffer::* invoker_type)(BOOST_FUNCTION_TEMPLATE_ARGS);
-        return (functor.*(get_vtable(). BOOST_NESTED_TEMPLATE invoker<invoker_type>()))(BOOST_FUNCTION_ARGS);
+        return (functor_.*(get_vtable(). BOOST_NESTED_TEMPLATE invoker<invoker_type>()))(BOOST_FUNCTION_ARGS);
     }
 
     result_type do_invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::false_ /*free call*/ ) const
     {
         typedef result_type (* invoker_type)( BOOST_FUNCTION_TEMPLATE_ARGS BOOST_FUNCTION_COMMA detail::function::function_buffer & );
-        return get_vtable(). BOOST_NESTED_TEMPLATE invoker<invoker_type>()( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA functor );
+        return get_vtable(). BOOST_NESTED_TEMPLATE invoker<invoker_type>()( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA functor_ );
     }
 
 
