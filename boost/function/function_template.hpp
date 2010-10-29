@@ -369,10 +369,6 @@ namespace boost {
 */
     }
 
-    // Implementation note:
-    //   GCC 4.5.1 makes an IMO poor judgment of not inlining this with -Os.
-    //                                        (28.10.2010.) (Domagoj Saric)
-    BF_FORCEINLINE
     result_type operator()(BOOST_FUNCTION_PARMS) const
     {
         return invoke( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA nothrow_policy() );

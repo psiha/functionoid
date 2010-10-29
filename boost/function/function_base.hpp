@@ -1189,10 +1189,6 @@ public:
 #endif // BOOST_FUNCTION_NO_RTTI
 
 protected:
-  // Implementation note:
-  //   GCC 4.5.1 makes an IMO poor judgment of not inlining this with -Os.
-  //                                        (28.10.2010.) (Domagoj Saric)
-  BF_FORCEINLINE
   detail::function::vtable const & get_vtable() const
   {
       BF_ASSUME( p_vtable_ );
@@ -1218,7 +1214,6 @@ protected:
   }
 
 private: // Assignment from another boost function helpers.
-  BF_NOINLINE
   void assign_boost_function_direct( function_base const & source )
   {
       source.p_vtable_->clone( source.functor_, this->functor_ );
@@ -1226,7 +1221,6 @@ private: // Assignment from another boost function helpers.
   }
 
   template <class EmptyHandler>
-  BF_NOINLINE
   void assign_boost_function_guarded( function_base const & source, detail::function::vtable const & empty_handler_vtable )
   {
       this->destroy();
@@ -1590,7 +1584,7 @@ namespace detail {
   namespace function {
 
     BOOST_FUNCTION_ENABLE_IF_FUNCTION
-    inline has_empty_target( Function const * const f )
+    BF_FORCEINLINE has_empty_target( Function const * const f )
     {
         return f->empty();
     }
@@ -1603,7 +1597,7 @@ namespace detail {
                 is_member_function_pointer<FunctionPtr>::value,
                 bool
              >::type
-    inline has_empty_target( FunctionPtr const * const funcPtr )
+    BF_FORCEINLINE has_empty_target( FunctionPtr const * const funcPtr )
     {
         return funcPtr == 0;
     }
@@ -1613,7 +1607,7 @@ namespace detail {
     // (e.g.MSVC 9.0 SP1 and GCC 4.6).
     //                                        (28.10.2010.) (Domagoj Saric)
     //inline bool has_empty_target(...)
-    inline bool has_empty_target( void const * )
+    BF_FORCEINLINE bool has_empty_target( void const * )
     {
         return false;
     }
@@ -1623,7 +1617,7 @@ namespace detail {
     // compilers (e.g. GCC 4.2.1).
     //                                        (28.10.2010.) (Domagoj Saric)
     template <class FunctionObj>
-    inline bool has_empty_target( reference_wrapper<FunctionObj> const * const f )
+    BF_FORCEINLINE bool has_empty_target( reference_wrapper<FunctionObj> const * const f )
     {
         // Implementation note:
         //   We save/assign a reference to a boost::function even if it is empty
