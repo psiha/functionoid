@@ -79,9 +79,9 @@ namespace detail
     #define BF_RESTRICT
 
     #ifdef _DEBUG
-        #define BF_FORCEINLINE
+        #define BF_FORCEINLINE inline
     #else
-        #define BF_FORCEINLINE __attribute__(( always_inline ))
+        #define BF_FORCEINLINE inline __attribute__(( always_inline ))
     #endif
     #define BF_NOINLINE __attribute__(( noinline ))
     #define BF_NORETURN __attribute__(( noreturn ))
