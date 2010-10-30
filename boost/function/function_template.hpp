@@ -477,30 +477,31 @@ private:
 		#endif
     }
 
-
-    #ifdef BOOST_MSVC
-        __declspec( nothrow )
+    #ifdef BF_HAS_NOTHROW
+        BF_NOTHROW
     #endif
     result_type invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::true_ /*no throw invoker*/ ) const
-    #ifndef BOOST_MSVC
+    #ifndef BF_HAS_NOTHROW
         throw()
     #endif
     {
         return do_invoke( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA detail::function::thiscall_optimization_available() );
     }
 
+    BF_FORCEINLINE
     result_type invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::false_ /*throwable invoker*/ ) const
     {
         return do_invoke( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA detail::function::thiscall_optimization_available() );
     }
 
-
+    BF_FORCEINLINE
     result_type do_invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::true_ /*this call*/ ) const
     {
         typedef result_type (detail::function::function_buffer::* invoker_type)(BOOST_FUNCTION_TEMPLATE_ARGS);
         return (functor_.*(get_vtable(). BOOST_NESTED_TEMPLATE invoker<invoker_type>()))(BOOST_FUNCTION_ARGS);
     }
 
+    BF_FORCEINLINE
     result_type do_invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::false_ /*free call*/ ) const
     {
         typedef result_type (* invoker_type)( BOOST_FUNCTION_TEMPLATE_ARGS BOOST_FUNCTION_COMMA detail::function::function_buffer & );

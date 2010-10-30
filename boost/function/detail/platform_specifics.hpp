@@ -37,6 +37,8 @@ namespace detail
     #define BF_NOTHROWNOALIAS           __declspec( nothrow noalias          )
     #define BF_NOTHROWNORESTRICTNOALIAS __declspec( nothrow restrict noalias )
 
+    #define BF_HAS_NOTHROW
+
     #define BF_SELECTANY __declspec( selectany )
 
     #define BF_CDECL    __cdecl
@@ -66,6 +68,8 @@ namespace detail
     #define BF_NOALIAS
     #define BF_NOTHROWNOALIAS           NOTHROW
     #define BF_NOTHROWNORESTRICTNOALIAS NOTHROW
+
+    #define BF_HAS_NOTHROW
 
     #ifdef _WIN32
         #define BF_SELECTANY __declspec( selectany )
