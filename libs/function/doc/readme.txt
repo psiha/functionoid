@@ -11,12 +11,11 @@ http://thread.gmane.org/gmane.comp.lib.boost.devel/194514/focus=195351
 http://article.gmane.org/gmane.comp.lib.boost.devel/196906.
 
 Currently this (alternate) code is based on original code from the
-boost::function official 1.40 release. For the originial documentation see
-http://www.boost.org/doc/libs/1_40_0/doc/html/function.html.
+boost::function official 1.43 release. For the originial documentation see
+http://www.boost.org/doc/libs/1_43_0/doc/html/function.html.
 
-Development is currently being done with MSVC++ 9.0 SP1 (with tests additionally
-performed with MSVC++ 8.0 SP1 and MSVC++ 10.0b2, compiling without /W4 warnings
-on all three compiler versions) so no jamfiles are provided yet.
+Development is currently being done with MSVC++ 10 (with tests additionally
+performed with GCC 4.2.1, GCC 4.5.1, GCC 4.6, Clang 2.0, Clang 2.8).
 
 For the sake of brevity of future commit messages, comments etc. allow me to 
 add a few terminology definitions. Looking at the boost/tr1::function<> design/
@@ -35,7 +34,8 @@ A few more notes:
 - the default interface and behaviour remain the same (current code should work
 the same without modification with these changes, "or so it seems to me")
 - the empty handler objects are required to satisfy the is_stateless<>
-condition
+condition (even though the current code shoud work even w/o this requirement
+being satisfied)
 - all function objects used with boost::function<> are expected to have a
 nothrow destructor
 - the swap and non-trivial assignement function do not offer the strong
