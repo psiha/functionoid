@@ -27,8 +27,9 @@ namespace boost
 {
 //------------------------------------------------------------------------------
 
-// Taken from funtion/function_template.hpp
-#if (defined __SUNPRO_CC) && (__SUNPRO_CC <= 0x530) && !(defined BOOST_NO_COMPILER_CONFIG)
+#if BOOST_WORKAROUND( BOOST_MSVC, >= 1600 )
+    #define BOOST_COMPILER_RECOGNIZES_SAFE_BOOL_IDIOM
+#elif (defined __SUNPRO_CC) && (__SUNPRO_CC <= 0x530) && !(defined BOOST_NO_COMPILER_CONFIG)
     // Sun C++ 5.3 can't handle the safe_bool idiom, so don't use it
     #define BOOST_NO_SAFE_BOOL
 #endif
@@ -41,81 +42,103 @@ private:
     struct unspecified_bool_type_helper
     {
         void member_function() {};
-        int member_data_;
+        int  member_data_;
     };
 
     typedef void (unspecified_bool_type_helper::*unspecified_bool_type_function) ();
     typedef int   unspecified_bool_type_helper::*unspecified_bool_type_data        ;
 
-    union fast_safe_bool
-    {
-        unsigned long                  plain_pointer_placeholder;
-        unspecified_bool_type_function pointer_to_member        ;
-    };
+    #ifndef BOOST_COMPILER_RECOGNIZES_SAFE_BOOL_IDIOM
+        union fast_safe_bool
+        {
+            unsigned long                  plain_pointer_placeholder;
+            unspecified_bool_type_function pointer_to_member        ;
+        };
 
-    //   It is assumed that if the compiler is able to fit a plain, single
-    // inheritance member function pointer into sizeof( void * ) that its null
-    // binary representation is identical to a plain null void pointer (all bits
-    // zeroed). Without a way to check this at compile time this asserted at
-    // runtime.
-    //   The above need not hold for data member pointers (e.g. MSVC++ uses -1
-    // for null-data member pointers).
-    typedef mpl::bool_
-        <
-            ( sizeof( fast_safe_bool ) <= sizeof( unsigned long ) )
-        > can_use_fast_bool_hack;
+        //   It is assumed that if the compiler is able to fit a plain, single
+        // inheritance member function pointer into sizeof( void * ) that its null
+        // binary representation is identical to a plain null void pointer (all bits
+        // zeroed). Without a way to check this at compile time this is asserted at
+        // runtime.
+        //   The above need not hold for data member pointers (e.g. MSVC++ uses -1
+        // for null-data member pointers).
+        typedef mpl::bool_
+            <
+                ( sizeof( fast_safe_bool ) <= sizeof( unsigned long ) )
+            > can_use_fast_bool_hack;
 
-protected:
-    typedef typename mpl::if_
-        <
-            can_use_fast_bool_hack,
-            unspecified_bool_type_function,
-            unspecified_bool_type_data
-        >::type unspecified_bool_type;
+    protected:
+        typedef typename mpl::if_
+            <
+                can_use_fast_bool_hack,
+                unspecified_bool_type_function,
+                unspecified_bool_type_data
+            >::type unspecified_bool_type;
 
-private:
-    static
-    unspecified_bool_type_function
-    make_safe_bool_standard_worker( bool const bool_value, unspecified_bool_type_function const null_value )
-    {
-        return bool_value ? &unspecified_bool_type_helper::member_function : null_value;
-    }
-    static
-    unspecified_bool_type_data
-    make_safe_bool_standard_worker( bool const bool_value, unspecified_bool_type_data     const null_value )
-    {
-        return bool_value ? &unspecified_bool_type_helper::member_data_    : null_value;
-    }
+    private:
+        static
+        unspecified_bool_type_function
+        make_safe_bool_standard_worker( bool const bool_value, unspecified_bool_type_function const null_value )
+        {
+            return bool_value ? &unspecified_bool_type_helper::member_function : null_value;
+        }
+        static
+        unspecified_bool_type_data
+        make_safe_bool_standard_worker( bool const bool_value, unspecified_bool_type_data     const null_value )
+        {
+            return bool_value ? &unspecified_bool_type_helper::member_data_    : null_value;
+        }
 
-    static
-    unspecified_bool_type make_safe_bool_worker( bool const value, mpl::false_ /*use standard version*/ )
-    {
-        return make_safe_bool_standard_worker( value, unspecified_bool_type( 0 ) );
-    }
+        static
+        unspecified_bool_type make_safe_bool_worker( bool const value, mpl::false_ /*use standard version*/ )
+        {
+            return make_safe_bool_standard_worker( value, unspecified_bool_type( 0 ) );
+        }
 
-    static
-    unspecified_bool_type make_safe_bool_worker( bool const value, mpl::true_ /*use fast-hack version*/ )
-    {
-        fast_safe_bool const fastSafeBool = { value };
-        BOOST_ASSERT
-        (
-            ( !!fastSafeBool.pointer_to_member == !!value ) &&
-            "The void-pointer-sized member pointer null binary"
-            "representation assumption does not hold for this"
-            "compiler/platform."
-        );
-        return fastSafeBool.pointer_to_member;
-    }
+        static
+        unspecified_bool_type make_safe_bool_worker( bool const value, mpl::true_ /*use fast-hack version*/ )
+        {
+            fast_safe_bool const & fastSafeBool( *static_cast<fast_safe_bool const *>( static_cast<void const *>( &value ) ) );
+            BOOST_ASSERT
+            (
+                ( !!fastSafeBool.pointer_to_member == !!value ) &&
+                "The void-pointer-sized member pointer null binary"
+                "representation assumption does not hold for this"
+                "compiler/platform."
+            );
+            return fastSafeBool.pointer_to_member;
+        }
 
-public:
-    typedef unspecified_bool_type type;
+    public:
+        typedef unspecified_bool_type type;
 
-    template <typename implicit_bool>
-    static type make( implicit_bool const value )
-    {
-        return make_safe_bool_worker( !!value, can_use_fast_bool_hack() );
-    }
+        template <typename implicit_bool>
+        static type make( implicit_bool const value )
+        {
+            return make_safe_bool_worker( !!value, can_use_fast_bool_hack() );
+        }
 
+        template <>
+        static type make<bool>( bool const value )
+        {
+            return make_safe_bool_worker( value, can_use_fast_bool_hack() );
+        }
+    #else // BOOST_COMPILER_RECOGNIZES_SAFE_BOOL_IDIOM
+    public:
+        typedef unspecified_bool_type_data type;
+
+        template <typename implicit_bool>
+        static type make( implicit_bool const value )
+        {
+            return make_safe_bool_worker( !!value );
+        }
+
+        template <>
+        static type make<bool>( bool const value )
+        {
+            return value ? &unspecified_bool_type_helper::member_data_ : 0;
+        }
+    #endif // BOOST_COMPILER_RECOGNIZES_SAFE_BOOL_IDIOM
 #else // BOOST_NO_SAFE_BOOL
 public:
     typedef bool unspecified_bool_type;
@@ -125,6 +148,12 @@ public:
     static type make( implicit_bool const value )
     {
         return !!value;
+    }
+
+    template <>
+    static type make<bool>( bool const value )
+    {
+        return value;
     }
 #endif // BOOST_NO_SAFE_BOOL
 }; // namespace detail

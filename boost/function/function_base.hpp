@@ -232,10 +232,10 @@ namespace boost {
           template <typename Functor>
           typed_functor( Functor & functor )
               :
-              pFunctor          ( boost::addressof( functor )  ),
-              type_id           ( BOOST_SP_TYPEID( Functor )   ),
-              const_qualified   ( is_const   <Functor>::value  ),
-              volatile_qualified( is_volatile<Functor>::value  )
+              pFunctor          ( boost::addressof( functor ) ),
+              type_id           ( BOOST_SP_TYPEID( Functor )  ),
+              const_qualified   ( is_const   <Functor>::value ),
+              volatile_qualified( is_volatile<Functor>::value )
           {
               BOOST_ASSERT( pFunctor );
           }
