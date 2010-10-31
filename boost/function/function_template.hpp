@@ -314,7 +314,7 @@ namespace boost {
     }
 
     /// Determine if the function is empty (i.e., has empty target).
-    bool empty() const { return p_vtable_ == &empty_handler_vtable(); }
+    bool empty() const { return p_vtable_->is_empty_handler_vtable(); }
 
     /// Clear out a target (replace it with an empty handler), if there is one.
     void clear()
@@ -566,7 +566,18 @@ private:
                 >
             >::type invoker_type;
 
-      return vtable_holder<invoker_type, manager_type>::stored_vtable;
+      BOOST_STATIC_ASSERT
+      ((
+        is_same<ActualFunctor, base_empty_handler>::value
+            ==
+        is_same<StoredFunctor, my_empty_handler  >::value
+      ));
+      // Implementation note:
+      //   Function alignment assumption verification. See the note for the
+      // detail::function::vtable struct for more info.
+      //                                      (31.10.2010.) (Domagoj Saric)
+      BOOST_ASSERT( ( reinterpret_cast<std::size_t>( &manager_type::move ) & static_cast<std::size_t>( 0x01 ) ) == 0 );
+      return vtable_holder<invoker_type, manager_type, is_same<ActualFunctor, base_empty_handler>::value>::stored_vtable;
     }
 
 

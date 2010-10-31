@@ -139,16 +139,19 @@
 
 
 #if defined( BOOST_MSVC ) || ( !defined( __clang__ ) && defined( __GNUC__ ) && ( ( ( __GNUC__ * 10 ) + __GNUC_MINOR__ ) >= 45 ) )
-    #define BF_VT_REF   &
-    #define BF_VT_DEREF *
+    #define BF_VT_REF            &
+    #define BF_VT_DEREF          *
+    #define BF_VT_REF_TO_POINTER &
     #define BF_FASTCALL_WORKAROUND BF_FASTCALL
 #elif defined( __clang__ )
-    #define BF_VT_REF   * const
+    #define BF_VT_REF            * const
     #define BF_VT_DEREF
+    #define BF_VT_REF_TO_POINTER
     #define BF_FASTCALL_WORKAROUND BF_FASTCALL
 #else
-    #define BF_VT_REF   * const
+    #define BF_VT_REF            * const
     #define BF_VT_DEREF
+    #define BF_VT_REF_TO_POINTER
     #define BF_FASTCALL_WORKAROUND // GCC 4.2.1 just doesn't seem happy with decorated function pointers...
 #endif
 
@@ -942,6 +945,7 @@ namespace boost {
         }
 #endif // BOOST_NO_SFINAE
 
+      // Implementation note:
       //  The "generic typed/void-void invoker pointer is also stored here so
       // that it can (more easily) be placed at the beginning of the vtable so
       // that a vtable pointer would actually point directly to it (thus
@@ -951,8 +955,33 @@ namespace boost {
       // copying/assignment between different boost::function<> instantiations.
       // A typed wrapper should therefor be added to the boost::function<>
       // class to catch such errors at compile-time.
+      //                                      (xx.xx.2009.) (Domagoj Saric)
+      // Implementation note:
+      //   To test whether a boost::function<> instance is empty a simple check
+      // whether the current vtable pointer points to the vtable for the current
+      // empty handler vtable is not good enough for applications that use DLLs
+      // (or equivalents) and pass boost::function<> instances across shared
+      // module boundaries. In such circumstances one can create an empty
+      // boost::function<> instance in module A, where it will get initialised
+      // with a vtable pointer pointing to the empty handler vtable stored in
+      // that module, pass it on to module B which will then query it whether
+      // it is empty at which point the function<> instance will incorrectly
+      // return false because it will compare its vtable pointer with the
+      // address of the empty handler vtable for module B. This comparison will
+      // obviously result in not-equal yielding the incorrect result.
+      //   Because of the above, 'is empty' information is additionally stored
+      // in the vtable. To avoid adding another (bool) member, one of the
+      // function pointers is mangled with the assumption that all of the
+      // functions are at least two-byte aligned and that the LSB is safe to use
+      // as storage. This obviously increases invocation overhead so the least
+      // frequently used function should be chosen, get_typed_functor would be
+      // the obvious choice but it need not exist (with BOOST_FUNCTION_NO_RTTI)
+      // so do_move was chosen.
+      //                                      (31.10.2010.) (Domagoj Saric)
       struct vtable
       {
+        bool is_empty_handler_vtable() const;
+
         typedef void ( function_buffer::* this_call_invoker_placeholder_type )( void );
         typedef void (                  * free_call_invoker_placeholder_type )( void );
         typedef mpl::if_
@@ -966,7 +995,7 @@ namespace boost {
         TargetInvokerType const & invoker() const { return reinterpret_cast<TargetInvokerType const &>( void_invoker ); }
 
         void clone  ( function_buffer const & in_buffer, function_buffer & out_buffer ) const { do_clone( in_buffer, out_buffer ); }
-        void move   ( function_buffer       & in_buffer, function_buffer & out_buffer ) const { do_move ( in_buffer, out_buffer ); }
+        void move   ( function_buffer       & in_buffer, function_buffer & out_buffer ) const;
         BF_NOTHROW
         void destroy( function_buffer       & buffer                                  ) const { do_destroy( buffer );              }
 
@@ -998,9 +1027,28 @@ namespace boost {
 
       #endif // BOOST_FUNCTION_NO_RTTI
 
+        typedef void (BF_FASTCALL_WORKAROUND * move_function_t )( function_buffer & in_buffer, function_buffer & out_buffer );
       };
 
-      template <class Invoker, class Manager>
+      inline bool vtable::is_empty_handler_vtable() const
+      {
+          return reinterpret_cast<std::size_t>( BF_VT_REF_TO_POINTER this->do_move ) & static_cast<std::size_t>( 0x01 );
+      }
+
+      inline void vtable::move( function_buffer & in_buffer, function_buffer & out_buffer ) const
+      {
+          BOOST_STATIC_ASSERT( sizeof( move_function_t ) == sizeof( std::size_t ) );
+          move_function_t const move_function
+          (
+            reinterpret_cast<move_function_t>
+            (
+                reinterpret_cast<std::size_t>( BF_VT_REF_TO_POINTER this->do_move ) & ~static_cast<std::size_t>( 0x01 )
+            )
+          );
+          move_function( in_buffer, out_buffer );
+      }
+
+      template <class Invoker, class Manager, bool is_empty_handler>
       struct vtable_holder
       {
           static vtable::this_call_invoker_placeholder_type get_invoker_pointer( mpl::true_ /*this call*/ )
@@ -1016,16 +1064,16 @@ namespace boost {
           static vtable const stored_vtable;
       };
 
-      // Note: it is extremely important that this initialization use
+      // Note: it is extremely important that this initialization uses
       // static initialization. Otherwise, we will have a race
       // condition here in multi-threaded code. See
       // http://thread.gmane.org/gmane.comp.lib.boost.devel/164902/.
-      template <class Invoker, class Manager>
-      vtable const vtable_holder<Invoker, Manager>::stored_vtable =
+      template <class Invoker, class Manager, bool is_empty_handler>
+      vtable const vtable_holder<Invoker, Manager, is_empty_handler>::stored_vtable =
       {
-          vtable_holder<Invoker, Manager>::get_invoker_pointer( thiscall_optimization_available() ),
+          vtable_holder<Invoker, Manager, is_empty_handler>::get_invoker_pointer( thiscall_optimization_available() ),
           BF_VT_DEREF &Manager::clone,
-          BF_VT_DEREF &Manager::move,
+          BF_VT_DEREF reinterpret_cast<vtable::move_function_t>( reinterpret_cast<std::size_t>( &Manager::move ) | ( is_empty_handler * 0x01 ) ),
           BF_VT_DEREF &Manager::destroy
         #ifndef BOOST_FUNCTION_NO_RTTI
           ,BF_VT_DEREF &Manager::get_typed_functor
