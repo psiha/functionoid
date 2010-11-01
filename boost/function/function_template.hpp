@@ -448,33 +448,52 @@ private:
             f( BOOST_FUNCTION_ARGS );
             return true;
         }
-        catch(...)
+        catch (...)
         {
             return false;
         }
     }
 
+    // Implementation note:
+    //   This function relies on "link-time optimizer procedure analysis
+    // introspection" to detect whether the compiler actually recognized a
+    // function as nothrow (expecting that in this case it will generate the
+    // same code for both functions which the linker will then merge giving them
+    // effectively identical addresses).
+    //   The method was tested to work in 32 bit release mode with MSVC++ 8.0,
+    // 9.0 and 10.0, it does not seem to work in 64 bit mode with the same
+    // compiler (the compiler generates the catch(...) clause code even for the
+    // most trivial and obviously nothrow functions).
+    //   Because this check relies on such undocumented non-standard trickery,
+    // for unsupported targets the function simply returns true and it is up to
+    // the user to make sure that only really nothrow targets are assigned to
+    // nothrow marked boost::functions.
+    //                                        (01.11.2010.) (Domagoj Saric)
     template <class F>
     static bool is_nothrow()
     {
-        typedef bool ( throw_test_signature ) ( typename unwrap_reference<F>::type & BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_ARGS );
-        return detail::function::is_nothrow_helper
-                <
-                    throw_test_signature,
-		            &BOOST_FUNCTION_FUNCTION:: BOOST_NESTED_TEMPLATE nothrow_test<typename unwrap_reference<F>::type>,
-		            &BOOST_FUNCTION_FUNCTION:: BOOST_NESTED_TEMPLATE throw_test  <typename unwrap_reference<F>::type>
-				>::is_nothrow;
+        #if !defined( _DEBUG ) && defined( BOOST_MSVC ) && defined( _M_IX86 )
+            typedef bool ( throw_test_signature ) ( typename unwrap_reference<F>::type & BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_ARGS );
+            return detail::function::is_nothrow_helper
+                   <
+                       throw_test_signature,
+		               &BOOST_FUNCTION_FUNCTION:: BOOST_NESTED_TEMPLATE nothrow_test<typename unwrap_reference<F>::type>,
+		               &BOOST_FUNCTION_FUNCTION:: BOOST_NESTED_TEMPLATE throw_test  <typename unwrap_reference<F>::type>
+		           >::is_nothrow;
 
-		#if defined(BOOST_MSVC) && BOOST_MSVC == 1400
-		    // MSVC++ 8.0 (SP1) linker reports "unresolved external symbol"
-		    // errors (which are erroneous themselves as the symbols do exist
-		    // and the binary works properly when linked with /FORCE) for the
-		    // test functions so we force their inclusion here. This is below
-		    // the return statement so as not to generate any code, this does
-		    // not generate any warning with the targeted compiler.
-			static throw_test_signature * const nothrower( &nothrow_test<unwrap_reference<F>::type> );
-			static throw_test_signature * const   thrower( &throw_test  <unwrap_reference<F>::type> );
-		#endif
+		    #if BOOST_WORKAROUND( BOOST_MSVC, == 1400 )
+		        // MSVC++ 8.0 (SP1) linker reports "unresolved external symbol"
+		        // errors (which are erroneous themselves as the symbols do exist
+		        // and the binary works properly when linked with /FORCE) for the
+		        // test functions so we force their inclusion here. This is below
+		        // the return statement so as not to generate any code, this does
+		        // not generate any warning with the targeted compiler.
+			    static throw_test_signature * const nothrower( &nothrow_test<unwrap_reference<F>::type> );
+			    static throw_test_signature * const   thrower( &throw_test  <unwrap_reference<F>::type> );
+		    #endif
+        #else
+            return true;
+        #endif // supported no-throw-check platforms
     }
 
     #ifdef BF_HAS_NOTHROW
