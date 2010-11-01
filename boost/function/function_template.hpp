@@ -169,8 +169,8 @@ namespace boost {
     typedef throw_on_empty                                   default_empty_handler ;
     typedef mpl::false_                                      default_nothrow_policy;
 
-    typedef typename mpl::at<PolicyList, EmptyHandler>::type user_specified_empty_handler ;
-    typedef typename mpl::at<PolicyList, Nothrow     >::type user_specified_nothrow_policy;
+    typedef typename mpl::at<PolicyList, empty_handler_t>::type user_specified_empty_handler ;
+    typedef typename mpl::at<PolicyList, is_no_throw_t  >::type user_specified_nothrow_policy;
 
   public: // Public typedefs/introspection section.
 #ifndef BOOST_NO_VOID_RETURNS
@@ -572,12 +572,8 @@ private:
             ==
         is_same<StoredFunctor, my_empty_handler  >::value
       ));
-      // Implementation note:
-      //   Function alignment assumption verification. See the note for the
-      // detail::function::vtable struct for more info.
-      //                                      (31.10.2010.) (Domagoj Saric)
-      BOOST_ASSERT( ( reinterpret_cast<std::size_t>( &manager_type::move ) & static_cast<std::size_t>( 0x01 ) ) == 0 );
-      return vtable_holder<invoker_type, manager_type, is_same<ActualFunctor, base_empty_handler>::value>::stored_vtable;
+      typedef is_same<ActualFunctor, base_empty_handler> is_empty_handler;
+      return vtable_holder<invoker_type, manager_type, is_empty_handler>::stored_vtable;
     }
 
 

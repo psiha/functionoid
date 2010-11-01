@@ -43,8 +43,8 @@ namespace boost {
 
   class bad_function_call;
 
-  struct EmptyHandler {};
-  struct Nothrow      {};
+  struct empty_handler_t {};
+  struct is_no_throw_t   {};
 
   typedef mpl::map0<> default_policies;
 
