@@ -160,10 +160,10 @@ namespace boost {
         public:
             typedef T value_type;
 
-            typedef value_type       * pointer        ;
-            typedef value_type       & reference      ;
-            typedef value_type const * const_pointer  ;
-            typedef value_type const & const_reference;
+            typedef value_type                           * pointer        ;
+            typedef value_type                           & reference      ;
+            typedef typename add_const<value_type>::type * const_pointer  ;
+            typedef typename add_const<value_type>::type & const_reference;
 
             typedef std::size_t    size_type      ;
             typedef std::ptrdiff_t difference_type;
@@ -190,8 +190,8 @@ namespace boost {
             void    deallocate( pointer   const ptr  , size_type /*count*/     ) { deallocate( ptr ); }
             void    deallocate( pointer   const ptr                            ) { ::operator delete( ptr ); }
 
-            void construct( pointer const ptr, T const & source ) { new ( ptr ) T( source ); }
-            void destroy  ( pointer const ptr                   ) { ptr->~T(); ignore_unused_variable_warning( ptr ); }
+            void construct( pointer const ptr, const_reference source ) { new ( ptr ) T( source ); }
+            void destroy  ( pointer const ptr                         ) { ptr->~T(); ignore_unused_variable_warning( ptr ); }
 
             static size_type max_size() { return (std::numeric_limits<size_type>::max)() / sizeof( T ); }
         };
