@@ -608,7 +608,13 @@ private:
     void do_assign( FunctionObj const & f, Allocator const a )
     {
         typedef typename detail::function::get_function_tag<FunctionObj>::type tag;
-        dispatch_assign<direct, FunctionObj>( f, a, tag() );
+        // Implementation note:
+        //   If the FunctionObj template parameter is (re)specified explicitly
+        // in the call to dispatch_assign MSVC 10 generates totally bogus code
+        // (causing access-violation crashes) when function pointers are
+        // assigned using the syntax without the ampersand.
+        //                                    (02.11.2010.) (Domagoj Saric)
+        dispatch_assign<direct>( f, a, tag() );
     }
 
     template <bool direct, typename FunctionObj>
