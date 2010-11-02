@@ -522,15 +522,22 @@ private:
 	// a possible exception being the case of an empty source as empty handler vtables depend on the
 	// policy as well as the signature).
     template <typename Allocator, typename ActualFunctor>
-    static vtable_type const & vtable_for_functor( BOOST_FUNCTION_FUNCTION const & functor )
+    static vtable_type const & vtable_for_functor_aux
+    (
+        mpl::true_, // is a boost::function<>
+        BOOST_FUNCTION_FUNCTION const & functor
+    )
     {
       BOOST_STATIC_ASSERT(( is_base_of<BOOST_FUNCTION_FUNCTION, ActualFunctor>::value ));
       return functor.get_vtable();
     }
 
     template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
-    typename disable_if<is_base_of<BOOST_FUNCTION_FUNCTION, StoredFunctor>, vtable_type const &>::type
-    static vtable_for_functor( StoredFunctor const & /*functor*/ )
+    static vtable_type const & vtable_for_functor_aux
+    (
+        mpl::false_, // is a boost::function<>
+        StoredFunctor const & /*functor*/
+    )
     {
       using namespace detail::function;
 
@@ -584,6 +591,15 @@ private:
       return vtable_holder<invoker_type, manager_type, is_empty_handler>::stored_vtable;
     }
 
+    template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
+    static vtable_type const & vtable_for_functor( StoredFunctor const & functor )
+    {
+        return vtable_for_functor_aux<Allocator, ActualFunctor>
+        (
+            is_base_of<BOOST_FUNCTION_FUNCTION, StoredFunctor>(),
+            functor
+        );        
+    }
 
     // ...direct actually means whether to skip pre-destruction (when not
     // assigning but constructing) so it should probably be renamed to
@@ -759,10 +775,10 @@ public:
 
   template<typename Functor>
 #ifndef BOOST_NO_SFINAE
-  typename enable_if_c<
-                            (boost::type_traits::ice_not<
-                         (is_integral<Functor>::value)>::value),
-                      self_type&>::type
+    typename enable_if_c<
+        (boost::type_traits::ice_not<
+        (is_integral<Functor>::value)>::value),
+    self_type&>::type
 #else
   self_type&
 #endif
