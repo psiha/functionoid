@@ -110,12 +110,6 @@
 #endif
 
 
-#if defined(BOOST_MSVC) && BOOST_MSVC <= 1300 || defined(__ICL) && __ICL <= 600 || defined(__MWERKS__) && __MWERKS__ < 0x2406 && !defined(BOOST_STRICT_CONFIG)
-#  define BOOST_FUNCTION_TARGET_FIX(x) x
-#else
-#  define BOOST_FUNCTION_TARGET_FIX(x)
-#endif // not MSVC
-
 #if !BOOST_WORKAROUND(__BORLANDC__, < 0x5A0)
 #  define BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL(Functor,Type)              \
       typename ::boost::enable_if_c<(::boost::type_traits::ice_not<          \

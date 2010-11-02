@@ -263,7 +263,7 @@ namespace boost {
     template <typename Functor>
     BOOST_FUNCTION_FUNCTION
     (
-        Functor BOOST_FUNCTION_TARGET_FIX(const &) f
+        Functor const & f
         #ifndef BOOST_NO_SFINAE
             ,typename enable_if_c<
             (boost::type_traits::ice_not<
@@ -278,7 +278,7 @@ namespace boost {
     template <typename Functor, typename Allocator>
     BOOST_FUNCTION_FUNCTION
     (
-        Functor BOOST_FUNCTION_TARGET_FIX(const &) f,
+        Functor const & f,
         Allocator const a
         #ifndef BOOST_NO_SFINAE
             ,typename enable_if_c<
@@ -372,23 +372,23 @@ namespace boost {
         return *this;
     }
 
-    template<typename Functor>
+    template <typename Functor>
 #ifndef BOOST_NO_SFINAE
     typename enable_if_c<
                (boost::type_traits::ice_not<
                  (is_integral<Functor>::value)>::value),
                BOOST_FUNCTION_FUNCTION&>::type
 #else
-    BOOST_FUNCTION_FUNCTION&
+    BOOST_FUNCTION_FUNCTION &
 #endif
-    operator=(Functor BOOST_FUNCTION_TARGET_FIX(const &) f)
+    operator=( Functor const & f )
     {
       this->assign(f);
       return *this;
     }
 
     template <typename FunctionObj, typename Allocator>
-    void assign( FunctionObj BOOST_FUNCTION_TARGET_FIX(const &) f, Allocator const a )
+    void assign( FunctionObj const & f, Allocator const a )
     {
         this->do_assign<false, FunctionObj>( f, a );
     }
