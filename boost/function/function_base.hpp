@@ -1200,6 +1200,10 @@ protected:
   template <class EmptyHandler>
   void swap( function_base & other, detail::function::vtable const & empty_handler_vtable );
 
+public:
+   /// Determine if the function is empty (i.e. has an empty target).
+   bool empty() const { return get_vtable().is_empty_handler_vtable(); }
+
 #ifndef BOOST_FUNCTION_NO_RTTI
 
   /// Retrieve the type of the stored function object.
@@ -1660,31 +1664,30 @@ template<typename Functor>
 namespace detail {
   namespace function {
 
-    BOOST_FUNCTION_ENABLE_IF_FUNCTION
-    BF_FORCEINLINE has_empty_target( Function const * const f )
-    {
-        return f->empty();
-    }
-
-    template <class FunctionPtr>
-    typename enable_if_c
-             <
-                is_pointer                <FunctionPtr>::value ||
-                is_function               <FunctionPtr>::value ||
-                is_member_function_pointer<FunctionPtr>::value,
-                bool
-             >::type
-    BF_FORCEINLINE has_empty_target( FunctionPtr const * const funcPtr )
+    template <typename T>
+    BF_FORCEINLINE bool has_empty_target_aux( T const * const funcPtr, function_ptr_tag )
     {
         return funcPtr == 0;
     }
 
+    template <typename T>
+    BF_FORCEINLINE bool has_empty_target_aux( T const * const funcPtr, member_ptr_tag )
+    {
+        return has_empty_target_aux<T>( funcPtr, function_ptr_tag() );
+    }
+
+    BF_FORCEINLINE bool has_empty_target_aux( function_base const * const f, function_obj_tag )
+    {
+        BF_ASSUME( f != NULL );
+        return f->empty();
+    }
+
     // Implementation note:
     //   Even the best compilers seem unable to inline vararg functions
-    // (e.g.MSVC 9.0 SP1 and GCC 4.6).
+    // (e.g. MSVC 9.0 SP1 and GCC 4.6).
     //                                        (28.10.2010.) (Domagoj Saric)
-    //inline bool has_empty_target(...)
-    BF_FORCEINLINE bool has_empty_target( void const * )
+    //inline bool has_empty_target_aux(...)
+    BF_FORCEINLINE bool has_empty_target_aux( void const * /*f*/, function_obj_tag )
     {
         return false;
     }
@@ -1694,7 +1697,7 @@ namespace detail {
     // compilers (e.g. GCC 4.2.1).
     //                                        (28.10.2010.) (Domagoj Saric)
     template <class FunctionObj>
-    BF_FORCEINLINE bool has_empty_target( reference_wrapper<FunctionObj> const * const f )
+    BF_FORCEINLINE bool has_empty_target_aux( reference_wrapper<FunctionObj> const * const f, function_obj_ref_tag )
     {
         // Implementation note:
         //   We save/assign a reference to a boost::function even if it is empty
@@ -1704,8 +1707,17 @@ namespace detail {
         BF_ASSUME( f->get_pointer() != 0 );
         return is_base_of<function_base, FunctionObj>::value
             ? ( f == 0 )
-            : has_empty_target( f->get_pointer() );
+            : has_empty_target_aux( f->get_pointer(), function_obj_tag() );
     }
+
+
+    template <typename T>
+    BF_FORCEINLINE bool has_empty_target( T const * const f )
+    {
+        typedef typename get_function_tag<T>::type tag;
+        return has_empty_target_aux( f, tag() );
+    }
+
 
     /* Just an experiment to show how can the current boost::mem_fn implementation
     be 'hacked' to work with custom mem_fn pointer holders (in this case a static

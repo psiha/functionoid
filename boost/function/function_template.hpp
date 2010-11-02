@@ -305,9 +305,6 @@ namespace boost {
         : function_base( static_cast<function_base const &>( f ) )
     {}
 
-    /// Determine if the function is empty (i.e., has empty target).
-    bool empty() const { return p_vtable_->is_empty_handler_vtable(); }
-
     /// Clear out a target (replace it with an empty handler), if there is one.
     void clear()
     {
