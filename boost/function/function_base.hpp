@@ -1148,14 +1148,54 @@ private: // Private helper guard classes.
   template <class EmptyHandler>
   class safe_mover;
 
-public:
+protected:
+    function_base() { detail::function::debug_clear( *this ); }
+    function_base( function_base const & other )
+    {
+        detail::function::debug_clear( *this );
+        assign_boost_function_direct( other );
+    }
+
     template <class EmptyHandler>
     function_base( detail::function::vtable const & empty_handler_vtable, EmptyHandler )
     {
         detail::function::debug_clear( *this );
         this->clear<true, EmptyHandler>( empty_handler_vtable );
     }
-    ~function_base() { destroy(); }
+
+    // Implementation note:
+    //   Ideally destruction/cleanup could be simply placed into the
+    // function_base destructor. However, this has unfortunate efficiency
+    // implications because it creates unnecessary EH states (=unnecessary code)
+    // in non-trivial (i.e. fallible/throwable) constructors of derived classes.
+    // In such cases the compiler has to generate EH code to call the
+    // function_base destructor if the derived-class constructor fails after
+    // function_base is already constructed. This is completely redundant
+    // because initially function_base is/was always initialized with the empty
+    // handler for which no destruction is necessary but the compiler does not
+    // see this because of the indirect vtable call.
+    //  Because of the above issue, default constructed function_base objects
+    // with a null/uninitialized vtable pointer are allowed and the duty to
+    // either throw an exception or properly initialized the vtable (along with
+    // the entire object) is shifted to the derived class destructor.
+    //                                        (02.11.2010.) (Domagoj Saric)
+    // Implementation note:
+    //   A by-the-book protected (empty) destructor is still added to prevent
+    // accidental deletion of a function_base pointer. However, because even a
+    // trivial empty destructor creates EH states with MSVC++ (even version 10)
+    // and possibly other compilers, it is removed from release builds.
+    //                                        (02.11.2010.) (Domagoj Saric)
+    /// \todo Devise a cleaner way to deal with all of this (maybe move/add more
+    /// template methods to function_base so that it can call assign methods
+    /// from its template constructors thereby moving all construction code
+    /// here).
+    ///                                       (02.11.2010.) (Domagoj Saric)
+#ifdef _DEBUG
+    ~function_base()
+    {
+        //...destroy();
+    }
+#endif // _DEBUG
 
   template <class EmptyHandler>
   void swap( function_base & other, detail::function::vtable const & empty_handler_vtable );
@@ -1227,6 +1267,11 @@ protected:
       return *p_vtable_;
   }
 
+  detail::function::function_buffer & functor() const
+  {
+      return functor_;
+  }
+
   template <bool direct, class EmptyHandler>
   BF_NOTHROW
   void clear( detail::function::vtable const & empty_handler_vtable )
@@ -1248,8 +1293,8 @@ protected:
 private: // Assignment from another boost function helpers.
   void assign_boost_function_direct( function_base const & source )
   {
-      source.p_vtable_->clone( source.functor_, this->functor_ );
-      p_vtable_ = source.p_vtable_;
+      source.get_vtable().clone( source.functor_, this->functor_ );
+      p_vtable_ = &source.get_vtable();
   }
 
   template <class EmptyHandler>
@@ -1335,10 +1380,10 @@ protected:
       this->swap<EmptyHandler>( tmp, empty_handler_vtable );
   }
 
-private:
+protected:
     void destroy() { get_vtable().destroy( this->functor_ ); }
 
-protected:
+private:
   // Fix/properly encapsulate these members and use the function_buffer_holder.
           detail::function::vtable          const * p_vtable_;
   mutable detail::function::function_buffer         functor_ ;
@@ -1703,14 +1748,11 @@ void function_base::assign
     else
     if ( direct )
     {
-        BOOST_ASSERT
-        (
-            ( this->p_vtable_ == &empty_handler_vtable ) ||
-            (
-                is_same<EmptyHandler, FunctionObj>::value &&
-                this->p_vtable_ == NULL
-            )
-        );
+        // Implementation note:
+        //   See the note for the function_base destructor as to why a null
+        // vtable is allowed here.
+        //                                    (02.11.2010.) (Domagoj Saric)
+        BOOST_ASSERT( this->p_vtable_ == NULL );
         typedef typename get_functor_manager<FunctionObj, Allocator>::type functor_manager;
         functor_manager::assign( f, this->functor_, a );
         this->p_vtable_ = &functor_vtable;
