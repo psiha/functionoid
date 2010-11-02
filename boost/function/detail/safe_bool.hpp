@@ -115,11 +115,10 @@ private:
         template <typename implicit_bool>
         static type make( implicit_bool const value )
         {
-            return make_safe_bool_worker( !!value, can_use_fast_bool_hack() );
+            return make( !!value );
         }
 
-        template <>
-        static type make<bool>( bool const value )
+        static type make( bool const value )
         {
             return make_safe_bool_worker( value, can_use_fast_bool_hack() );
         }
@@ -130,11 +129,10 @@ private:
         template <typename implicit_bool>
         static type make( implicit_bool const value )
         {
-            return make_safe_bool_worker( !!value );
+            return make( !!value );
         }
 
-        template <>
-        static type make<bool>( bool const value )
+        static type make( bool const value )
         {
             return value ? &unspecified_bool_type_helper::member_data_ : 0;
         }
@@ -150,8 +148,7 @@ public:
         return !!value;
     }
 
-    template <>
-    static type make<bool>( bool const value )
+    static type make( bool const value )
     {
         return value;
     }
