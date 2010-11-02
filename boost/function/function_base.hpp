@@ -1511,6 +1511,9 @@ public:
 };
 
 
+
+#ifndef BOOST_NO_SFINAE
+
 #define BOOST_FUNCTION_ENABLE_IF_FUNCTION                   \
     template <class Function>                               \
     typename enable_if                                      \
@@ -1519,7 +1522,6 @@ public:
                 bool                                        \
              >::type
 
-#ifndef BOOST_NO_SFINAE
 BOOST_FUNCTION_ENABLE_IF_FUNCTION
 inline operator==(const Function& f, detail::function::useless_clear_type*)
 {
@@ -1543,7 +1545,9 @@ inline operator!=(detail::function::useless_clear_type*, const Function& f)
 {
   return !f.empty();
 }
-#endif
+
+#undef BOOST_FUNCTION_ENABLE_IF_FUNCTION
+#endif // BOOST_NO_SFINAE
 
 #ifdef BOOST_NO_SFINAE
 // Comparisons between boost::function objects and arbitrary function objects
@@ -1800,7 +1804,6 @@ void function_base::assign
 
 #undef BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL
 #undef BOOST_FUNCTION_COMPARE_TYPE_ID
-#undef BOOST_FUNCTION_ENABLE_IF_FUNCTION
 //...zzz...required in function_template.hpp #undef BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT
 #undef BF_VT_REF
 #undef BF_VT_DEREF
