@@ -150,24 +150,19 @@ namespace boost {
         = default_policies
     #endif // BOOST_FUNCTION_MAX_ARGS > 10
   >
-  class BOOST_FUNCTION_FUNCTION : public function_base
-
+  class BOOST_FUNCTION_FUNCTION
+    : public function_base
 #if BOOST_FUNCTION_NUM_ARGS == 1
-
     , public std::unary_function<T0,R>
-
 #elif BOOST_FUNCTION_NUM_ARGS == 2
-
     , public std::binary_function<T0,T1,R>
-
 #endif
-
   {
   private: // Actual policies deduction section.
     //mpl::at<AssocSeq,Key,Default> does not yet exist so...:
 
-    typedef throw_on_empty                                   default_empty_handler ;
-    typedef mpl::false_                                      default_nothrow_policy;
+    typedef throw_on_empty                                      default_empty_handler ;
+    typedef mpl::false_                                         default_nothrow_policy;
 
     typedef typename mpl::at<PolicyList, empty_handler_t>::type user_specified_empty_handler ;
     typedef typename mpl::at<PolicyList, is_no_throw_t  >::type user_specified_nothrow_policy;
@@ -261,6 +256,8 @@ namespace boost {
         #endif // BOOST_MSVC
     }
 
+    ~BOOST_FUNCTION_FUNCTION() { function_base::destroy(); }
+
     // MSVC chokes if the following two constructors are collapsed into
     // one with a default parameter.
     template <typename Functor>
@@ -274,8 +271,6 @@ namespace boost {
                         int>::type = 0
         #endif // BOOST_NO_SFINAE
     )
-      :
-      function_base( empty_handler_vtable(), base_empty_handler() )
     {
       this->do_assign<true, Functor>( f );
     }
@@ -292,8 +287,6 @@ namespace boost {
                         int>::type = 0
         #endif // BOOST_NO_SFINAE
     )
-      :
-      function_base( empty_handler_vtable(), base_empty_handler() )
     {
       this->do_assign<true, Functor>( f, a );
     }
@@ -308,10 +301,9 @@ namespace boost {
     }
 #endif
 
-    BOOST_FUNCTION_FUNCTION(const BOOST_FUNCTION_FUNCTION& f) : function_base( empty_handler_vtable(), base_empty_handler() )
-    {
-      this->do_assign<true>( f );
-    }
+    BOOST_FUNCTION_FUNCTION( BOOST_FUNCTION_FUNCTION const & f )
+        : function_base( static_cast<function_base const &>( f ) )
+    {}
 
     /// Determine if the function is empty (i.e., has empty target).
     bool empty() const { return p_vtable_->is_empty_handler_vtable(); }
@@ -517,14 +509,14 @@ private:
     result_type do_invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::true_ /*this call*/ ) const
     {
         typedef result_type (detail::function::function_buffer::* invoker_type)(BOOST_FUNCTION_TEMPLATE_ARGS);
-        return (functor_.*(get_vtable(). BOOST_NESTED_TEMPLATE invoker<invoker_type>()))(BOOST_FUNCTION_ARGS);
+        return (functor().*(get_vtable(). BOOST_NESTED_TEMPLATE invoker<invoker_type>()))(BOOST_FUNCTION_ARGS);
     }
 
     BF_FORCEINLINE
     result_type do_invoke( BOOST_FUNCTION_PARMS BOOST_FUNCTION_COMMA mpl::false_ /*free call*/ ) const
     {
         typedef result_type (* invoker_type)( BOOST_FUNCTION_TEMPLATE_ARGS BOOST_FUNCTION_COMMA detail::function::function_buffer & );
-        return get_vtable(). BOOST_NESTED_TEMPLATE invoker<invoker_type>()( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA functor_ );
+        return get_vtable(). BOOST_NESTED_TEMPLATE invoker<invoker_type>()( BOOST_FUNCTION_ARGS BOOST_FUNCTION_COMMA functor() );
     }
 
 
