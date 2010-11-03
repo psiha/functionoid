@@ -127,14 +127,14 @@
 #else
 // BCC doesn't recognize this depends on a template argument and complains
 // about the use of 'typename'
-#  define BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL(Functor,Type)     \
+#  define BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL(Functor,Type)       \
       ::boost::enable_if_c<(::boost::type_traits::ice_not<          \
                    (::boost::is_integral<Functor>::value)>::value), \
                        Type>::type
 #endif
 
 
-#if defined( __clang__ ) || ( defined( __GNUC__ ) && ( ( ( __GNUC__ * 10 ) + __GNUC_MINOR__ ) < 45 ) )
+#if defined( __IBMCPP__ ) || defined( __clang__ ) || ( defined( __GNUC__ ) && ( ( ( __GNUC__ * 10 ) + __GNUC_MINOR__ ) < 45 ) )
     #define BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT BOOST_ASSERT
 #else
     #define BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT BOOST_STATIC_ASSERT
@@ -1364,65 +1364,68 @@ private:
   // Fix/properly encapsulate these members and use the function_buffer_holder.
           detail::function::vtable          const * p_vtable_;
   mutable detail::function::function_buffer         functor_ ;
-};
 
-
-class function_base::safe_mover_base : noncopyable
-{
-protected:
-    typedef detail::function::vtable          vtable;
-    typedef detail::function::function_buffer functor;
-
-protected:
-    safe_mover_base( function_base & functionToGuard, function_base & emptyFunctionToMoveTo )
-        :
-        pFunctionToRestoreTo  ( &functionToGuard                   ),
-        emptyFunctionToMoveTo_( emptyFunctionToMoveTo              ),
-        empty_handler_vtable_ ( emptyFunctionToMoveTo.get_vtable() )
+private:
+    // Implementation note:
+    //  VisualAge 11.1 seems to have problems if the following two classes are
+    // defined out-of-body.
+    //                                        (03.11.2010.) (Domagoj Saric)
+    class safe_mover_base : noncopyable
     {
-        BOOST_ASSERT( emptyFunctionToMoveTo.p_vtable_ == &empty_handler_vtable_ );
-        move( functionToGuard, emptyFunctionToMoveTo, empty_handler_vtable_ );
-    }
+    protected:
+        typedef detail::function::vtable          vtable;
+        typedef detail::function::function_buffer functor;
 
-    ~safe_mover_base() {}
-
-public:
-    void cancel() { BOOST_ASSERT( pFunctionToRestoreTo ); pFunctionToRestoreTo = 0; }
-
-    static void move( function_base & source, function_base & destination, vtable const & empty_handler_vtable )
-    {
-        source.get_vtable().move( source.functor_, destination.functor_ );
-        destination.p_vtable_ = source.p_vtable_;
-        source     .p_vtable_ = &empty_handler_vtable;
-    }
-
-protected:
-    function_base * pFunctionToRestoreTo  ;
-    function_base & emptyFunctionToMoveTo_;
-    vtable const  & empty_handler_vtable_ ;
-};
-
-
-// ...if the is_stateless<EmptyHandler> requirement sticks this will not need
-// to be a template...
-template <class EmptyHandler>
-class function_base::safe_mover : public safe_mover_base
-{
-public:
-    safe_mover( function_base & functionToGuard, function_base & emptyFunctionToMoveTo )
-        :
-        safe_mover_base( functionToGuard, emptyFunctionToMoveTo ) {}
-    ~safe_mover()
-    {
-        if ( pFunctionToRestoreTo )
+    protected:
+        safe_mover_base( function_base & functionToGuard, function_base & emptyFunctionToMoveTo )
+            :
+            pFunctionToRestoreTo  ( &functionToGuard                   ),
+            emptyFunctionToMoveTo_( emptyFunctionToMoveTo              ),
+            empty_handler_vtable_ ( emptyFunctionToMoveTo.get_vtable() )
         {
-            cleaner<EmptyHandler> guard( *pFunctionToRestoreTo, empty_handler_vtable_ );
-            move( emptyFunctionToMoveTo_, *pFunctionToRestoreTo, empty_handler_vtable_ );
-            guard.cancel();
+            BOOST_ASSERT( emptyFunctionToMoveTo.p_vtable_ == &empty_handler_vtable_ );
+            move( functionToGuard, emptyFunctionToMoveTo, empty_handler_vtable_ );
         }
-    }
-};
 
+        ~safe_mover_base() {}
+
+    public:
+        void cancel() { BOOST_ASSERT( pFunctionToRestoreTo ); pFunctionToRestoreTo = 0; }
+
+        static void move( function_base & source, function_base & destination, vtable const & empty_handler_vtable )
+        {
+            source.get_vtable().move( source.functor_, destination.functor_ );
+            destination.p_vtable_ = source.p_vtable_;
+            source     .p_vtable_ = &empty_handler_vtable;
+        }
+
+    protected:
+        function_base * pFunctionToRestoreTo  ;
+        function_base & emptyFunctionToMoveTo_;
+        vtable const  & empty_handler_vtable_ ;
+    };
+
+
+    // ...if the is_stateless<EmptyHandler> requirement sticks this will not need
+    // to be a template...
+    template <class EmptyHandler>
+    class safe_mover : public safe_mover_base
+    {
+    public:
+        safe_mover( function_base & functionToGuard, function_base & emptyFunctionToMoveTo )
+            :
+            safe_mover_base( functionToGuard, emptyFunctionToMoveTo ) {}
+        ~safe_mover()
+        {
+            if ( pFunctionToRestoreTo )
+            {
+                cleaner<EmptyHandler> guard( *pFunctionToRestoreTo, empty_handler_vtable_ );
+                move( emptyFunctionToMoveTo_, *pFunctionToRestoreTo, empty_handler_vtable_ );
+                guard.cancel();
+            }
+        }
+    };
+}; // class function_base
 
 template <class EmptyHandler>
 void function_base::swap( function_base & other, detail::function::vtable const & empty_handler_vtable )
@@ -1466,7 +1469,7 @@ public:
     {
         throw_bad_call();
         #ifndef BF_HAS_NORETURN
-            return get_default_value<result_type>( is_reference<result_type>() );
+            return detail::function::get_default_value<result_type>( is_reference<result_type>() );
         #endif // BOOST_MSVC
     }
 };
