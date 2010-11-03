@@ -27,9 +27,7 @@ namespace boost
 {
 //------------------------------------------------------------------------------
 
-#if BOOST_WORKAROUND( BOOST_MSVC, >= 1600 )
-    #define BOOST_COMPILER_RECOGNIZES_SAFE_BOOL_IDIOM
-#elif (defined __SUNPRO_CC) && (__SUNPRO_CC <= 0x530) && !(defined BOOST_NO_COMPILER_CONFIG)
+#if (defined __SUNPRO_CC) && (__SUNPRO_CC <= 0x530) && !(defined BOOST_NO_COMPILER_CONFIG)
     // Sun C++ 5.3 can't handle the safe_bool idiom, so don't use it
     #define BOOST_NO_SAFE_BOOL
 #endif
@@ -48,7 +46,7 @@ private:
     typedef void (unspecified_bool_type_helper::*unspecified_bool_type_function) ();
     typedef int   unspecified_bool_type_helper::*unspecified_bool_type_data        ;
 
-    #ifndef BOOST_COMPILER_RECOGNIZES_SAFE_BOOL_IDIOM
+    #ifdef BOOST_NO_FAST_SAFE_BOOL_FROM_DATA_MEMBER
         union fast_safe_bool
         {
             unsigned long                  plain_pointer_placeholder;
@@ -96,7 +94,7 @@ private:
         }
 
         static
-        unspecified_bool_type make_safe_bool_worker( bool const value, mpl::true_ /*use fast-hack version*/ )
+		unspecified_bool_type make_safe_bool_worker( std::size_t const value, mpl::true_ /*use fast-hack version*/ )
         {
             fast_safe_bool const & fastSafeBool( *static_cast<fast_safe_bool const *>( static_cast<void const *>( &value ) ) );
             BOOST_ASSERT
@@ -122,7 +120,7 @@ private:
         {
             return make_safe_bool_worker( value, can_use_fast_bool_hack() );
         }
-    #else // BOOST_COMPILER_RECOGNIZES_SAFE_BOOL_IDIOM
+    #else // BOOST_NO_FAST_SAFE_BOOL_FROM_DATA_MEMBER
     public:
         typedef unspecified_bool_type_data type;
 
@@ -136,7 +134,7 @@ private:
         {
             return value ? &unspecified_bool_type_helper::member_data_ : 0;
         }
-    #endif // BOOST_COMPILER_RECOGNIZES_SAFE_BOOL_IDIOM
+    #endif // BOOST_NO_FAST_SAFE_BOOL_FROM_DATA_MEMBER
 #else // BOOST_NO_SAFE_BOOL
 public:
     typedef bool unspecified_bool_type;
