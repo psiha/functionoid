@@ -40,6 +40,7 @@
 #include <boost/get_pointer.hpp>
 #include <boost/noncopyable.hpp>
 #include <boost/type_traits/add_const.hpp>
+#include <boost/type_traits/add_pointer.hpp>
 #include <boost/type_traits/add_reference.hpp>
 #include <boost/type_traits/has_nothrow_copy.hpp>
 #include <boost/type_traits/has_trivial_copy.hpp>

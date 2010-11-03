@@ -314,6 +314,12 @@ namespace boost {
         this->do_assign<false, FunctionObj>( f );
     }
 
+    template <typename FunctionObj, typename Allocator>
+    void assign( FunctionObj const & f, Allocator const a )
+    {
+        this->do_assign<false, FunctionObj>( f, a );
+    }
+
     template <signature_type * f>
     void assign()
     {
@@ -380,14 +386,8 @@ namespace boost {
 #endif
     operator=( Functor const & f )
     {
-      this->assign(f);
+      this->assign( f );
       return *this;
-    }
-
-    template <typename FunctionObj, typename Allocator>
-    void assign( FunctionObj const & f, Allocator const a )
-    {
-        this->do_assign<false, FunctionObj>( f, a );
     }
 
 
@@ -605,29 +605,39 @@ private:
     void do_assign( FunctionObj const & f, Allocator const a )
     {
         typedef typename detail::function::get_function_tag<FunctionObj>::type tag;
-        // Implementation note:
-        //   If the FunctionObj template parameter is (re)specified explicitly
-        // in the call to dispatch_assign MSVC 10 generates totally bogus code
-        // (causing access-violation crashes) when function pointers are
-        // assigned using the syntax without the ampersand.
-        //                                    (02.11.2010.) (Domagoj Saric)
-        dispatch_assign<direct>( f, a, tag() );
+        dispatch_assign<direct, FunctionObj>( f, a, tag() );
     }
 
     template <bool direct, typename FunctionObj>
-    void do_assign( FunctionObj const & f ) { do_assign<direct>( f, detail::function::fallocator<FunctionObj>() ); }
+    void do_assign( FunctionObj const & f ) { do_assign<direct, FunctionObj>( f, detail::function::fallocator<FunctionObj>() ); }
 
     template <bool direct, typename FunctionObj, typename Allocator>
-    void dispatch_assign( FunctionObj const & f, Allocator const a, detail::function::function_obj_tag     ) { do_assign<direct, FunctionObj>( f      ,        f   , a ); }
-    template <bool direct, typename FunctionObj, typename Allocator> // This one has to be exactly as it is for GCC and Clang...:
-    void dispatch_assign( FunctionObj const   f, Allocator const a, detail::function::function_ptr_tag     ) { do_assign<direct             >( f      ,        f   , a ); }
-    // DPG TBD: Add explicit support for member function
-    // objects, so we invoke through mem_fn() but we retain the
-    // right target_type() values.
+    void dispatch_assign( FunctionObj const & f, Allocator const a, detail::function::function_obj_tag     ) { do_assign<direct,          FunctionObj      >( f      ,        f   , a ); }
+    // Explicit support for member function objects, so we invoke through
+    // mem_fn() but retain the right target_type() values.
     template <bool direct, typename FunctionObj, typename Allocator>
-    void dispatch_assign( FunctionObj const & f, Allocator const a, detail::function::member_ptr_tag       ) { do_assign<direct, FunctionObj>( f      , mem_fn( f ), a ); }
+    void dispatch_assign( FunctionObj const & f, Allocator const a, detail::function::member_ptr_tag       ) { do_assign<direct,          FunctionObj      >( f      , mem_fn( f ), a ); }
     template <bool direct, typename FunctionObj, typename Allocator>
     void dispatch_assign( FunctionObj const & f, Allocator const a, detail::function::function_obj_ref_tag ) { do_assign<direct, typename FunctionObj::type>( f.get(),         f  , a ); }
+    template <bool direct, typename FunctionObj, typename Allocator>
+    void dispatch_assign( FunctionObj const & f, Allocator const a, detail::function::function_ptr_tag     )
+    {
+        // Implementation note:
+        //   Plain function pointers need special care because when assigned
+        // using the syntax without the ampersand they wreck havoc with certain
+        // compilers, causing either compilation failures or broken runtime
+        // behaviour, e.g. not invoking the assigned target with GCC 4.0.1 or
+        // causing access-violation crashes with MSVC (tested 8 and 10).
+        //                                    (03.11.2010.) (Domagoj Saric)
+        typedef typename add_pointer
+        <
+            typename remove_const
+            <
+                typename remove_pointer<FunctionObj>::type
+            >::type
+        >::type non_const_function_pointer_t;
+        do_assign<direct, non_const_function_pointer_t, non_const_function_pointer_t>( f, f, a );
+    }
 
     template <bool direct, typename ActualFunctor, typename StoredFunctor, typename ActualFunctorAllocator>
     void do_assign( ActualFunctor const &, StoredFunctor const & stored_functor, ActualFunctorAllocator const a )
