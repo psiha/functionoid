@@ -123,6 +123,8 @@ namespace detail
     #define BF_RESTRICT
 
     #define BF_FORCEINLINE inline
+    #define BF_NOINLINE
+    #define BF_NORETURN
 
     #define BF_OVERRIDE
     #define BF_SEALED
@@ -150,6 +152,8 @@ namespace detail
     #define BF_RESTRICT
 
     #define BF_FORCEINLINE inline
+    #define BF_NOINLINE
+    #define BF_NORETURN
 
     #define BF_OVERRIDE
     #define BF_SEALED
