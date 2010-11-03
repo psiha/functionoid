@@ -211,18 +211,14 @@ namespace boost {
 
         struct thiscall_optimization_available_helper
         {
-            static void free_function () {}
-                   void bound_function() {}
+			typedef void (                                        * free_function ) ();
+			typedef void (thiscall_optimization_available_helper::* bound_function) ();
 
-            BOOST_STATIC_CONSTANT( bool, value = sizeof( &thiscall_optimization_available_helper::free_function ) == sizeof( &thiscall_optimization_available_helper::bound_function ) );
+            BOOST_STATIC_CONSTANT( bool, value = sizeof( thiscall_optimization_available_helper::free_function ) == sizeof( thiscall_optimization_available_helper::bound_function ) );
         };
 
         typedef mpl::bool_
         <
-            //...zzz...MSVC10 does not like this...
-            //sizeof( &thiscall_optimization_available_helper::free_function  )
-            //    ==
-            //sizeof( &thiscall_optimization_available_helper::bound_function )
             thiscall_optimization_available_helper::value
         > thiscall_optimization_available;
 
