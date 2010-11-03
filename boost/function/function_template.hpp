@@ -256,7 +256,6 @@ namespace boost {
         #endif // BOOST_MSVC
     }
 
-    ~BOOST_FUNCTION_FUNCTION() { function_base::destroy(); }
 
     // MSVC chokes if the following two constructors are collapsed into
     // one with a default parameter.
@@ -271,9 +270,8 @@ namespace boost {
                         int>::type = 0
         #endif // BOOST_NO_SFINAE
     )
-    {
-      this->do_assign<true, Functor>( f );
-    }
+        : function_base( no_eh_state_construction_trick( f ) )
+    {}
 
     template <typename Functor, typename Allocator>
     BOOST_FUNCTION_FUNCTION
@@ -287,9 +285,8 @@ namespace boost {
                         int>::type = 0
         #endif // BOOST_NO_SFINAE
     )
-    {
-      this->do_assign<true, Functor>( f, a );
-    }
+        : function_base( no_eh_state_construction_trick( f, a ) )
+    {}
 
 
 #ifndef BOOST_NO_SFINAE
@@ -395,13 +392,13 @@ namespace boost {
 
 
 #ifndef BOOST_NO_SFINAE
-    BOOST_FUNCTION_FUNCTION& operator=(clear_type*)
+    BOOST_FUNCTION_FUNCTION & operator=(clear_type*)
     {
       this->clear();
       return *this;
     }
 #else
-    BOOST_FUNCTION_FUNCTION& operator=(int zero)
+    BOOST_FUNCTION_FUNCTION & operator=(int zero)
     {
       BOOST_ASSERT(zero == 0);
       this->clear();
@@ -633,7 +630,7 @@ private:
     void dispatch_assign( FunctionObj const & f, Allocator const a, detail::function::function_obj_ref_tag ) { do_assign<direct, typename FunctionObj::type>( f.get(),         f  , a ); }
 
     template <bool direct, typename ActualFunctor, typename StoredFunctor, typename ActualFunctorAllocator>
-    void do_assign( ActualFunctor const & original_functor, StoredFunctor const & stored_functor, ActualFunctorAllocator const a )
+    void do_assign( ActualFunctor const &, StoredFunctor const & stored_functor, ActualFunctorAllocator const a )
     {
         if
         (
@@ -676,6 +673,47 @@ private:
                 is_base_of<BOOST_FUNCTION_FUNCTION, StoredFunctor>() /*are we assigning another boost::function*/
             );
         }
+    }
+
+    // Implementation note:
+    //   Simply default-constructing funciton_base and then performing proper
+    // initialization in the body of the derived class constructor has
+    // unfortunate efficiency implications because it creates unnecessary
+    // EH states (=unnecessary bloat) in case of non-trivial
+    // (i.e. fallible/throwable) constructors of derived classes (when
+    // constructing from/with complex function objects).
+    //   In such cases the compiler has to generate EH code to call the
+    // (non-trivial) function_base destructor if the derived-class constructor
+    // fails after function_base is already constructed. This is completely
+    // redundant because initially function_base is/was always initialized with
+    // the empty handler for which no destruction is necessary but the compiler
+    // does not see this because of the indirect vtable call.
+    //   Because of the above issue, the helper functions below are used as a
+    // quick-hack to actually construct the function_base/
+    // BOOST_FUNCTION_FUNCTION object before the function_base constructor is
+    // called. The entire object is also cleared beforehand in debugging builds
+    // to allow checking that the vtable and/or the function_buffer are not used
+    // before being initialized.
+    //                                        (02.11.2010.) (Domagoj Saric)
+    /// \todo Devise a cleaner way to deal with all of this (maybe move/add more
+    /// template methods to function_base so that it can call assign methods
+    /// from its template constructors thereby moving all construction code
+    /// there).
+    ///                                       (02.11.2010.) (Domagoj Saric)
+    template <typename FunctionObj, typename Allocator>
+    detail::function::vtable const & no_eh_state_construction_trick( FunctionObj const & f, Allocator const a )
+    {
+        detail::function::debug_clear( *this );
+        do_assign<true>( f, a );
+        return function_base::get_vtable();
+    }
+
+    template <typename FunctionObj>
+    detail::function::vtable const & no_eh_state_construction_trick( FunctionObj const & f )
+    {
+        detail::function::debug_clear( *this );
+        do_assign<true>( f, detail::function::fallocator<FunctionObj>() );
+        return function_base::get_vtable();
     }
   };
 

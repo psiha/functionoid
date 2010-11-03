@@ -1158,38 +1158,12 @@ protected:
     }
 
     // Implementation note:
-    //   Ideally destruction/cleanup could be simply placed into the
-    // function_base destructor. However, this has unfortunate efficiency
-    // implications because it creates unnecessary EH states (=unnecessary code)
-    // in non-trivial (i.e. fallible/throwable) constructors of derived classes.
-    // In such cases the compiler has to generate EH code to call the
-    // function_base destructor if the derived-class constructor fails after
-    // function_base is already constructed. This is completely redundant
-    // because initially function_base is/was always initialized with the empty
-    // handler for which no destruction is necessary but the compiler does not
-    // see this because of the indirect vtable call.
-    //  Because of the above issue, default constructed function_base objects
-    // with a null/uninitialized vtable pointer are allowed and the duty to
-    // either throw an exception or properly initialized the vtable (along with
-    // the entire object) is shifted to the derived class destructor.
-    //                                        (02.11.2010.) (Domagoj Saric)
-    // Implementation note:
-    //   A by-the-book protected (empty) destructor is still added to prevent
-    // accidental deletion of a function_base pointer. However, because even a
-    // trivial empty destructor creates EH states with MSVC++ (even version 10)
-    // and possibly other compilers, it is removed from release builds.
-    //                                        (02.11.2010.) (Domagoj Saric)
-    /// \todo Devise a cleaner way to deal with all of this (maybe move/add more
-    /// template methods to function_base so that it can call assign methods
-    /// from its template constructors thereby moving all construction code
-    /// here).
-    ///                                       (02.11.2010.) (Domagoj Saric)
-#ifdef _DEBUG
-    ~function_base()
-    {
-        //...destroy();
-    }
-#endif // _DEBUG
+    //   See the note for the no_eh_state_construction_trick() helper in
+    // function_template.hpp to see the purpose of this constructor.
+    //                                        (03.11.2010.) (Domagoj Saric)
+    function_base( detail::function::vtable const & vtable ) { BF_ASSUME( &vtable == p_vtable_ ); }
+
+    ~function_base() { destroy(); }
 
   template <class EmptyHandler>
   void swap( function_base & other, detail::function::vtable const & empty_handler_vtable );
@@ -1358,7 +1332,7 @@ protected:
       this->p_vtable_ = &functor_vtable;
   }
 
-  template<typename EmptyHandler, typename FunctionObj, typename Allocator>
+  template <typename EmptyHandler, typename FunctionObj, typename Allocator>
   void actual_assign
   (
     FunctionObj              const & f,
@@ -1378,7 +1352,7 @@ protected:
       this->swap<EmptyHandler>( tmp, empty_handler_vtable );
   }
 
-protected:
+private:
     void destroy() { get_vtable().destroy( this->functor_ ); }
 
 private:
@@ -1759,8 +1733,9 @@ void function_base::assign
     if ( direct )
     {
         // Implementation note:
-        //   See the note for the function_base destructor as to why a null
-        // vtable is allowed here.
+        //   See the note for the no_eh_state_construction_trick() helper in
+        // function_template.hpp as to why a null vtable is allowed and expected
+        // here.
         //                                    (02.11.2010.) (Domagoj Saric)
         BOOST_ASSERT( this->p_vtable_ == NULL );
         typedef typename get_functor_manager<FunctionObj, Allocator>::type functor_manager;
