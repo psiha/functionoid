@@ -226,7 +226,13 @@ namespace boost {
       // For transferring stored function object type information back to the
       // interface side.
       class typed_functor
-      #ifndef __GNUC__ //...zzz...GCC and Clang have serious RVO problems...
+      // Implementation note:
+      //   GCC, Clang and VisualAge seem to have serious RVO problems. Because
+      // it looks like a widespread problem (and because it is used only as a
+      // redundant-copy detection tool), noncopyable is used only with compilers
+      // that are known to be able to work/compile with it.
+      //                                      (04.11.2010.) (Domagoj Saric)
+      #if defined( BOOST_MSVC ) || defined( __SUNPRO_CC )
           : noncopyable
       #endif // __GNUC__
       {
@@ -238,9 +244,7 @@ namespace boost {
               type_id           ( BOOST_SP_TYPEID( Functor )  ),
               const_qualified   ( is_const   <Functor>::value ),
               volatile_qualified( is_volatile<Functor>::value )
-          {
-              BOOST_ASSERT( pFunctor );
-          }
+          {}
 
           detail::sp_typeinfo const & functor_type_info() const { return type_id; }
 
@@ -1095,7 +1099,7 @@ private: // Private helper guard classes.
   // ...if the is_stateless<EmptyHandler> requirement sticks this will not need
   // to be a template...
   template <class EmptyHandler>
-  class cleaner : noncopyable
+  class cleaner : private noncopyable
   {
   typedef detail::function::vtable vtable;
   public:
@@ -1361,7 +1365,6 @@ private:
     void destroy() { get_vtable().destroy( this->functor_ ); }
 
 private:
-  // Fix/properly encapsulate these members and use the function_buffer_holder.
           detail::function::vtable          const * p_vtable_;
   mutable detail::function::function_buffer         functor_ ;
 
@@ -1370,7 +1373,7 @@ private:
     //  VisualAge 11.1 seems to have problems if the following two classes are
     // defined out-of-body.
     //                                        (03.11.2010.) (Domagoj Saric)
-    class safe_mover_base : noncopyable
+    class safe_mover_base : private noncopyable
     {
     protected:
         typedef detail::function::vtable          vtable;
