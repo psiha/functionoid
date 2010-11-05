@@ -70,6 +70,23 @@
 #  define BOOST_FUNCTION_RETURN(X) X; return BOOST_FUNCTION_VOID_RETURN_TYPE ()
 #endif
 
+#ifndef BOOST_NO_SFINAE
+    #define BOOST_FUNCTION_NULL_POINTER_ASSIGNMENT( ReturnType )            \
+    ReturnType & operator=( detail::function::useless_clear_type const * )  \
+    {                                                                       \
+        this->clear();                                                      \
+        return *this;                                                       \
+    }
+#else // BOOST_NO_SFINAE
+    #define BOOST_FUNCTION_NULL_POINTER_ASSIGNMENT( ReturnType )            \
+    ReturnType & operator=( int const zero )                                \
+    {                                                                       \
+        BOOST_ASSERT( zero == 0 );                                          \
+        this->clear();                                                      \
+        return *this;                                                       \
+    }
+#endif // BOOST_NO_SFINAE
+
 namespace boost {
   namespace detail {
     namespace function {
@@ -178,20 +195,16 @@ namespace boost {
     BOOST_STATIC_CONSTANT(int, args = BOOST_FUNCTION_NUM_ARGS);
 
     // add signature for boost::lambda
-    template<typename Args>
-    struct sig
-    {
-      typedef result_type type;
-    };
+    template <typename Args> struct sig { typedef result_type type; };
 
-#if BOOST_FUNCTION_NUM_ARGS == 1
+#if   BOOST_FUNCTION_NUM_ARGS == 1
     typedef T0 argument_type;
 #elif BOOST_FUNCTION_NUM_ARGS == 2
     typedef T0 first_argument_type;
     typedef T1 second_argument_type;
 #endif
 
-    BOOST_STATIC_CONSTANT(int, arity = BOOST_FUNCTION_NUM_ARGS);
+    BOOST_STATIC_CONSTANT( int, arity = BOOST_FUNCTION_NUM_ARGS );
     BOOST_FUNCTION_ARG_TYPES
 
     typedef BOOST_FUNCTION_FUNCTION self_type;
@@ -237,8 +250,6 @@ namespace boost {
 
     typedef detail::function::vtable vtable_type;
 
-    struct clear_type {};
-
   public: // Public function interface.
 
     BOOST_FUNCTION_FUNCTION() : function_base( empty_handler_vtable(), base_empty_handler() )
@@ -256,69 +267,40 @@ namespace boost {
         #endif // BOOST_MSVC
     }
 
-
-    // MSVC chokes if the following two constructors are collapsed into
-    // one with a default parameter.
     template <typename Functor>
-    BOOST_FUNCTION_FUNCTION
-    (
-        Functor const & f
-        #ifndef BOOST_NO_SFINAE
-            ,typename enable_if_c<
-            (boost::type_traits::ice_not<
-                (is_integral<Functor>::value)>::value),
-                        int>::type = 0
-        #endif // BOOST_NO_SFINAE
-    )
-        : function_base( no_eh_state_construction_trick( f ) )
-    {}
+    BOOST_FUNCTION_FUNCTION( Functor const & f,                    BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL( Functor, int ) = 0 )
+        : function_base( no_eh_state_construction_trick( f ) ) {}
 
     template <typename Functor, typename Allocator>
-    BOOST_FUNCTION_FUNCTION
-    (
-        Functor const & f,
-        Allocator const a
+    BOOST_FUNCTION_FUNCTION( Functor const & f, Allocator const a, BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL( Functor, int ) = 0 )
+        : function_base( no_eh_state_construction_trick( f, a ) ) {}
+
+    #ifdef BF_TAKES_FUNCTION_REFERENCES
+        BOOST_FUNCTION_FUNCTION( signature_type & plain_function_reference )
+            : function_base( no_eh_state_construction_trick( plain_function_reference ) ) { BF_ASSUME( &plain_function_reference ); }
         #ifndef BOOST_NO_SFINAE
-            ,typename enable_if_c<
-            (boost::type_traits::ice_not<
-                (is_integral<Functor>::value)>::value),
-                        int>::type = 0
+            BOOST_FUNCTION_FUNCTION( detail::function::useless_clear_type const * )
+                : function_base( empty_handler_vtable(), base_empty_handler() ) {}
+        #else
+            BOOST_FUNCTION_FUNCTION( int const zero )
+                : function_base( empty_handler_vtable(), base_empty_handler() ) { BOOST_ASSERT( zero == 0 ); }
         #endif // BOOST_NO_SFINAE
-    )
-        : function_base( no_eh_state_construction_trick( f, a ) )
-    {}
-
-
-#ifndef BOOST_NO_SFINAE
-    BOOST_FUNCTION_FUNCTION(clear_type*) : function_base( empty_handler_vtable(), base_empty_handler() ) { }
-#else
-    BOOST_FUNCTION_FUNCTION(int zero) : function_base( empty_handler_vtable(), base_empty_handler() )
-    {
-      BOOST_ASSERT(zero == 0);
-    }
-#endif
+    #else // BF_TAKES_FUNCTION_REFERENCES
+        BOOST_FUNCTION_FUNCTION( signature_type * const plain_function_pointer )
+            : function_base( no_eh_state_construction_trick( plain_function_pointer ) ) {}
+    #endif // BF_TAKES_FUNCTION_REFERENCES
 
     BOOST_FUNCTION_FUNCTION( BOOST_FUNCTION_FUNCTION const & f )
-        : function_base( static_cast<function_base const &>( f ) )
-    {}
+        : function_base( static_cast<function_base const &>( f ) ) {}
 
     /// Clear out a target (replace it with an empty handler), if there is one.
-    void clear()
-    {
-        function_base::clear<false, base_empty_handler>( empty_handler_vtable() );
-    }
+    void clear() { function_base::clear<false, base_empty_handler>( empty_handler_vtable() ); }
 
-    template<typename FunctionObj>
-    void assign( FunctionObj const & f )
-    {
-        this->do_assign<false, FunctionObj>( f );
-    }
+    template <typename FunctionObj>
+    void assign( FunctionObj const & f                    ) { this->do_assign<false, FunctionObj>( f    ); }
 
     template <typename FunctionObj, typename Allocator>
-    void assign( FunctionObj const & f, Allocator const a )
-    {
-        this->do_assign<false, FunctionObj>( f, a );
-    }
+    void assign( FunctionObj const & f, Allocator const a ) { this->do_assign<false, FunctionObj>( f, a ); }
 
     template <signature_type * f>
     void assign()
@@ -376,35 +358,29 @@ namespace boost {
     }
 
     template <typename Functor>
-#ifndef BOOST_NO_SFINAE
-    typename enable_if_c<
-               (boost::type_traits::ice_not<
-                 (is_integral<Functor>::value)>::value),
-               BOOST_FUNCTION_FUNCTION&>::type
-#else
-    BOOST_FUNCTION_FUNCTION &
-#endif
+    BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL( Functor, BOOST_FUNCTION_FUNCTION & )
     operator=( Functor const & f )
     {
       this->assign( f );
       return *this;
     }
 
+    #ifdef BF_TAKES_FUNCTION_REFERENCES
+        BOOST_FUNCTION_FUNCTION & operator=( signature_type & plain_function_reference )
+        {
+            BF_ASSUME( &plain_function_reference );
+            this->assign( plain_function_reference );
+            return *this;
+        }
 
-#ifndef BOOST_NO_SFINAE
-    BOOST_FUNCTION_FUNCTION & operator=(clear_type*)
-    {
-      this->clear();
-      return *this;
-    }
-#else
-    BOOST_FUNCTION_FUNCTION & operator=(int zero)
-    {
-      BOOST_ASSERT(zero == 0);
-      this->clear();
-      return *this;
-    }
-#endif
+        BOOST_FUNCTION_NULL_POINTER_ASSIGNMENT( BOOST_FUNCTION_FUNCTION )
+    #else // BF_TAKES_FUNCTION_REFERENCES
+        BOOST_FUNCTION_FUNCTION & operator=( signature_type * const plain_function_pointer )
+        {
+            this->assign( plain_function_pointer );
+            return *this;
+        }
+    #endif // BF_TAKES_FUNCTION_REFERENCES
 
     void swap( BOOST_FUNCTION_FUNCTION & other )
     {
@@ -636,7 +612,36 @@ private:
                 typename remove_pointer<FunctionObj>::type
             >::type
         >::type non_const_function_pointer_t;
-        do_assign<direct, non_const_function_pointer_t, non_const_function_pointer_t>( f, f, a );
+
+        // Implementation note:
+        //   Single place to handle int-assignment for non SFINAE enabled
+        // compilers.
+        //                                    (05.11.2010.) (Domagoj Saric)
+        #ifdef BOOST_NO_SFINAE
+            typedef typename mpl::if_
+            <
+                is_integral<FunctionObj>,
+                signature_type *,
+                non_const_function_pointer_t
+            >::type correct_type_t;
+
+            if ( is_integral<FunctionObj>::value )
+            {
+                BOOST_ASSERT( reinterpret_cast<int const &>( f ) == 0 );
+                function_base::clear<direct, base_empty_handler>( empty_handler_vtable() );
+            }
+            else
+            {
+                // Implementation note:
+                //   Ugh...(exactly) this seems to work with the 'ampersandless'
+                // syntax.
+                //                            (05.11.2010.) (Domagoj Saric)
+                do_assign<direct, correct_type_t, correct_type_t>( reinterpret_cast<correct_type_t>( f ), reinterpret_cast<correct_type_t>( f ), a );
+            }
+        #else
+            typedef non_const_function_pointer_t correct_type_t;
+            do_assign<direct, non_const_function_pointer_t, non_const_function_pointer_t>( f, f, a );
+        #endif
     }
 
     template <bool direct, typename ActualFunctor, typename StoredFunctor, typename ActualFunctorAllocator>
@@ -725,6 +730,16 @@ private:
         do_assign<true>( f, detail::function::fallocator<FunctionObj>() );
         return function_base::get_vtable();
     }
+
+    #ifdef BF_TAKES_FUNCTION_REFERENCES
+        detail::function::vtable const & no_eh_state_construction_trick( signature_type & plain_function_reference )
+        {
+            BF_ASSUME( &plain_function_reference );
+            detail::function::debug_clear( *this );
+            do_assign<true>( plain_function_reference );
+            return function_base::get_vtable();
+        }
+    #endif // BF_TAKES_FUNCTION_REFERENCES
   };
 
   template<typename R BOOST_FUNCTION_COMMA BOOST_FUNCTION_TEMPLATE_PARMS, class PolicyList>
@@ -778,77 +793,59 @@ public:
   function() {}
 
   template <typename Functor>
-  function
-  (
-    Functor const & f
-    #ifndef BOOST_NO_SFINAE
-        ,typename enable_if_c<
-                        (boost::type_traits::ice_not<
-                        (is_integral<Functor>::value)>::value),
-                    int>::type = 0
-    #endif
-  )
-    :
-    base_type( f )
-  {}
+  function( Functor const & f,                    BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL( Functor, int ) = 0 ) : base_type( f    ) {}
 
   template <typename Functor, typename Allocator>
-  function
-  (
-    Functor   const & f,
-    Allocator const   a
+  function( Functor const & f, Allocator const a, BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL( Functor, int ) = 0 ) : base_type( f, a ) {}
+
+  #ifdef BF_TAKES_FUNCTION_REFERENCES
+    function( typename base_type::signature_type &       plain_function_reference ) : base_type( plain_function_reference ) {}
     #ifndef BOOST_NO_SFINAE
-        ,typename enable_if_c<
-                        (boost::type_traits::ice_not<
-                        (is_integral<Functor>::value)>::value),
-                    int>::type = 0
-    #endif
-  )
-    :
-    base_type( f, a )
-  {}
+        function( detail::function::useless_clear_type const * ) : base_type() {}
+    #endif // BOOST_NO_SFINAE
+  #else // BF_TAKES_FUNCTION_REFERENCES
+    function( typename base_type::signature_type * const plain_function_pointer   ) : base_type( plain_function_pointer   ) {}
+  #endif // BF_TAKES_FUNCTION_REFERENCES
 
-#ifndef BOOST_NO_SFINAE
-  function(clear_type*) : base_type() {}
-#endif
+  function( self_type const & f ) : base_type( static_cast<base_type const &>( f ) ) {}
 
-  function(const self_type& f) : base_type(static_cast<const base_type&>(f)){}
-
-  function(const base_type& f) : base_type(static_cast<const base_type&>(f)){}
+  function( base_type const & f ) : base_type( static_cast<base_type const &>( f ) ) {}
 
   // The distinction between when to use BOOST_FUNCTION_FUNCTION and
   // when to use self_type is obnoxious. MSVC cannot handle self_type as
   // the return type of these assignment operators, but Borland C++ cannot
   // handle BOOST_FUNCTION_FUNCTION as the type of the temporary to
   // construct.
-  self_type& operator=(const self_type& f)
+  self_type & operator=( self_type const & f )
   {
       this->assign( f );
       return *this;
   }
 
-  template<typename Functor>
-#ifndef BOOST_NO_SFINAE
-    typename enable_if_c<
-        (boost::type_traits::ice_not<
-        (is_integral<Functor>::value)>::value),
-    self_type&>::type
-#else
-  self_type&
-#endif
-  operator=(Functor const & f)
+  template <typename Functor>
+  BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL( Functor, self_type & )
+  operator=( Functor const & f )
   {
     this-> BOOST_NESTED_TEMPLATE assign<Functor>( f );
     return *this;
   }
 
-#ifndef BOOST_NO_SFINAE
-  self_type& operator=(clear_type*)
-  {
-    this->clear();
-    return *this;
-  }
-#endif
+  #ifdef BF_TAKES_FUNCTION_REFERENCES
+      self_type & operator=( typename base_type::signature_type & plain_function_reference )
+      {
+          BF_ASSUME( &plain_function_reference );
+          this->assign( plain_function_reference );
+          return *this;
+      }
+
+      BOOST_FUNCTION_NULL_POINTER_ASSIGNMENT( self_type )
+  #else // BF_TAKES_FUNCTION_REFERENCES
+      self_type & operator=( typename base_type::signature_type * const plain_function_pointer )
+      {
+          this->assign( plain_function_pointer );
+          return *this;
+      }
+  #endif // BF_TAKES_FUNCTION_REFERENCES
 };
 
 #undef BOOST_FUNCTION_PARTIAL_SPEC
@@ -870,6 +867,8 @@ public:
 #undef BOOST_FUNCTION_ARG_TYPES
 #undef BOOST_FUNCTION_VOID_RETURN_TYPE
 #undef BOOST_FUNCTION_RETURN
+
+#undef BOOST_FUNCTION_NULL_POINTER_ASSIGNMENT
 
 #if defined(BOOST_MSVC)
 #   pragma warning( pop )

@@ -58,10 +58,14 @@ namespace detail
     #define BF_UNREACHABLE_CODE    BOOST_ASSERT( !"This code should not be reached." ); __assume( false );
     #define BF_ASSUME( condition ) BOOST_ASSERT( condition ); __assume( condition )
 
+    #define BF_TAKES_FUNCTION_REFERENCES
+
     #define BF_GNU_SPECIFIC(  expression )
     #define BF_MSVC_SPECIFIC( expression ) expression
 
 #elif defined( __clang__ ) || defined( __GNUC__ )
+
+    #define BF_TAKES_FUNCTION_REFERENCES
 
     #define BF_NOVTABLE
     #define BF_NOTHROW                  __attribute__(( nothrow ))

@@ -119,20 +119,23 @@
 #  define BOOST_FUNCTION_TARGET_FIX(x)
 #endif // not MSVC
 
-#if !BOOST_WORKAROUND(__BORLANDC__, < 0x5A0)
-#  define BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL(Functor,Type)              \
-      typename ::boost::enable_if_c<(::boost::type_traits::ice_not<          \
-                            (::boost::is_integral<Functor>::value)>::value), \
+#ifndef BOOST_NO_SFINAE
+    #if !BOOST_WORKAROUND(__BORLANDC__, < 0x5A0)
+    #  define BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL(Functor,Type)                \
+          typename ::boost::enable_if_c<(::boost::type_traits::ice_not<          \
+                                (::boost::is_integral<Functor>::value)>::value), \
+                               Type>::type
+    #else
+    // BCC doesn't recognize this depends on a template argument and complains
+    // about the use of 'typename'
+    #  define BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL(Functor,Type)       \
+          ::boost::enable_if_c<(::boost::type_traits::ice_not<          \
+                       (::boost::is_integral<Functor>::value)>::value), \
                            Type>::type
-#else
-// BCC doesn't recognize this depends on a template argument and complains
-// about the use of 'typename'
-#  define BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL(Functor,Type)       \
-      ::boost::enable_if_c<(::boost::type_traits::ice_not<          \
-                   (::boost::is_integral<Functor>::value)>::value), \
-                       Type>::type
-#endif
-
+    #endif
+#else // BOOST_NO_SFINAE
+    #define BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL( Functor, Type ) Type
+#endif // BOOST_NO_SFINAE
 
 #if defined( __IBMCPP__ ) || defined( __clang__ ) || ( defined( __GNUC__ ) && ( ( ( __GNUC__ * 10 ) + __GNUC_MINOR__ ) < 45 ) )
     #define BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT BOOST_ASSERT
@@ -413,6 +416,9 @@ namespace boost {
       {
         typedef typename mpl::if_c<(is_pointer<F>::value ||
                                    is_function<F>::value ||
+                                   #ifdef BOOST_NO_SFINAE
+                                     is_integral<F>::value || // to interpret NULL as function pointer...
+                                   #endif // BOOST_NO_SFINAE
                                    is_msvc_exception_specified_function_pointer<F>::value),
                                    function_ptr_tag,
                                    function_obj_tag>::type ptr_or_obj_tag;
@@ -1648,15 +1654,15 @@ namespace detail {
   namespace function {
 
     template <typename T>
-    BF_FORCEINLINE bool has_empty_target_aux( T const * const funcPtr, function_ptr_tag )
+    BF_FORCEINLINE bool has_empty_target( T * const funcPtr, function_ptr_tag )
     {
         return funcPtr == 0;
     }
 
     template <typename T>
-    BF_FORCEINLINE bool has_empty_target_aux( T const * const funcPtr, member_ptr_tag )
+    BF_FORCEINLINE bool has_empty_target_aux( T * const funcPtr, member_ptr_tag )
     {
-        return has_empty_target_aux<T>( funcPtr, function_ptr_tag() );
+        return has_empty_target<T>( funcPtr, function_ptr_tag() );
     }
 
     BF_FORCEINLINE bool has_empty_target_aux( function_base const * const f, function_obj_tag )
@@ -1675,30 +1681,26 @@ namespace detail {
         return false;
     }
 
+    template <typename T>
+    BF_FORCEINLINE bool has_empty_target( T const & f, function_obj_tag )
+    {
+        return has_empty_target_aux( boost::addressof( f ), function_obj_tag() );
+    }
+
     // Implementation note:
     //   This has to be after the void const * overload because of non-lazy
     // compilers (e.g. GCC 4.2.1).
     //                                        (28.10.2010.) (Domagoj Saric)
     template <class FunctionObj>
-    BF_FORCEINLINE bool has_empty_target_aux( reference_wrapper<FunctionObj> const * const f, function_obj_ref_tag )
+    BF_FORCEINLINE bool has_empty_target( reference_wrapper<FunctionObj> const & f, function_obj_ref_tag )
     {
         // Implementation note:
         //   We save/assign a reference to a boost::function even if it is empty
         // and let the referenced function handle a possible empty invocation.
         //                                    (28.10.2010.) (Domagoj Saric)
-        BF_ASSUME( f                != 0 );
-        BF_ASSUME( f->get_pointer() != 0 );
         return is_base_of<function_base, FunctionObj>::value
-            ? ( f == 0 )
-            : has_empty_target_aux( f->get_pointer(), function_obj_tag() );
-    }
-
-
-    template <typename T>
-    BF_FORCEINLINE bool has_empty_target( T const * const f )
-    {
-        typedef typename get_function_tag<T>::type tag;
-        return has_empty_target_aux( f, tag() );
+            ? false
+            : has_empty_target( f.get(), function_obj_tag() );
     }
 
 
@@ -1738,7 +1740,8 @@ void function_base::assign
 {
     using namespace detail::function;
 
-    if ( has_empty_target( boost::addressof( f ) ) )
+    typedef typename get_function_tag<FunctionObj>::type tag;
+    if ( has_empty_target( f, tag() ) )
         this->clear<direct, EmptyHandler>( empty_handler_vtable );
     else
     if ( direct )
@@ -1788,7 +1791,7 @@ void function_base::assign
 
 } // end namespace boost
 
-#undef BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL
+//...zzz...required in function_template.hpp #undef BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL
 #undef BOOST_FUNCTION_COMPARE_TYPE_ID
 //...zzz...required in function_template.hpp #undef BOOST_FUNCTION_CLANG_AND_OLD_GCC_BROKEN_STATIC_ASSERT
 #undef BF_VT_REF
