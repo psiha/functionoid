@@ -1,12 +1,13 @@
 This is an attempt at an alternate boost::function implementation that
 - minimizes template and RTTI bloat
-- has less (run)time overhead
+- has (much) less (run)time overhead (for invocation, copy-construction and assignment)
 - provides configurability through policies.
 
 It is intended to be a drop-in replacement hence the same folder name as the
 original.
 
 For more information see the relevant discussion threads at boost.devel:
+http://lists.boost.org/Archives/boost/2010/10/172593.php
 http://thread.gmane.org/gmane.comp.lib.boost.devel/194514/focus=195351
 http://article.gmane.org/gmane.comp.lib.boost.devel/196906.
 
@@ -14,8 +15,16 @@ Currently this (alternate) code is based on original code from the
 boost::function official 1.43 release. For the originial documentation see
 http://www.boost.org/doc/libs/1_43_0/doc/html/function.html.
 
-Development is currently being done with MSVC++ 10 (with tests additionally
-performed with GCC 4.2.1, GCC 4.5.1, GCC 4.6, Clang 2.0, Clang 2.8).
+It was tested (compiling and running real world projects, building Boost and
+running Boost regression tests) with the following compilers:
+ - MSVC++ 8.0 SP1, 10.0 (x86 and x64)
+ - GCC 4.0.1, 4.2.1, 4.5.1
+ - Clang 2.0, 2.8
+ - Sun Studio 5.9, 5.10
+ - VisualAge 11.1.
+
+The latest version can always be retrieved from https://svn.boost.org/svn/boost/sandbox/function/boost/function.
+
 
 For the sake of brevity of future commit messages, comments etc. allow me to 
 add a few terminology definitions. Looking at the boost/tr1::function<> design/
