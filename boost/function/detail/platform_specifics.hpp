@@ -31,6 +31,8 @@ namespace detail
 
 #if defined( BOOST_MSVC )
 
+    #define BF_TAKES_FUNCTION_REFERENCES
+
     #define BF_NOVTABLE                 __declspec( novtable                 )
     #define BF_NOTHROW                  __declspec( nothrow                  )
     #define BF_NOALIAS                  __declspec( noalias                  )
@@ -58,8 +60,6 @@ namespace detail
     #define BF_UNREACHABLE_CODE    BOOST_ASSERT( !"This code should not be reached." ); __assume( false );
     #define BF_ASSUME( condition ) BOOST_ASSERT( condition ); __assume( condition )
 
-    #define BF_TAKES_FUNCTION_REFERENCES
-
     #define BF_GNU_SPECIFIC(  expression )
     #define BF_MSVC_SPECIFIC( expression ) expression
 
@@ -81,7 +81,7 @@ namespace detail
         #define BF_SELECTANY
     #endif
 
-    #define BF_CDECL    __attribute__(( cdecl ))
+    #define BF_CDECL    __attribute__(( cdecl    ))
     #define BF_FASTCALL __attribute__(( fastcall ))
 
     #define BF_RESTRICT
