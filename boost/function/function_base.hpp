@@ -302,16 +302,13 @@ namespace boost {
        * object pointers, and a structure that resembles a bound
        * member function pointer.
        */
-      #ifdef BOOST_MSVC
-        // http://msdn.microsoft.com/en-us/library/5ft82fed(VS.80).aspx (ad unions)
-        #define BF_AUX_RESTRICT __restrict
-      #else
-        #define BF_AUX_RESTRICT
-      #endif
+
+      // http://msdn.microsoft.com/en-us/library/5ft82fed(VS.80).aspx (ad unions)
+
       union function_buffer
       {
         // For pointers to function objects
-        void * BF_AUX_RESTRICT obj_ptr;
+        void * BF_POINTER_RESTRICT obj_ptr;
 
         //  For 'trivial' function objects (that can be managed without type
         // information) that must be allocated on the heap (we must only save
@@ -323,19 +320,17 @@ namespace boost {
         } trivial_heap_obj;
 
         // For function pointers of all kinds
-        void (* BF_AUX_RESTRICT func_ptr)();
+        void (* BF_POINTER_RESTRICT func_ptr)();
 
         // For bound member pointers
         struct bound_memfunc_ptr_t {
           class X;
-          void (X::* BF_AUX_RESTRICT memfunc_ptr)(int);
+          void (X::* BF_POINTER_RESTRICT memfunc_ptr)(int);
           void * obj_ptr;
         } bound_memfunc_ptr;
 
-        // To relax aliasing constraints
-        char data;
+        double max_alignment_helper;
       };
-      #undef BF_AUX_RESTRICT
 
       // A simple wrapper to allow deriving and a thiscall invoker.
       struct function_buffer_holder { function_buffer buffer; };
@@ -1003,10 +998,9 @@ namespace boost {
         template<typename TargetInvokerType>
         TargetInvokerType const & invoker() const { return reinterpret_cast<TargetInvokerType const &>( void_invoker ); }
 
-        void clone  ( function_buffer const & in_buffer, function_buffer & out_buffer ) const { do_clone( in_buffer, out_buffer ); }
-        void move   ( function_buffer       & in_buffer, function_buffer & out_buffer ) const { do_move ( in_buffer, out_buffer ); }
-        BF_NOTHROW
-        void destroy( function_buffer       & buffer                                  ) const { do_destroy( buffer );              }
+        void BF_NOALIAS        clone  ( function_buffer const & in_buffer, function_buffer & out_buffer ) const { do_clone( in_buffer, out_buffer ); }
+        void BF_NOALIAS        move   ( function_buffer       & in_buffer, function_buffer & out_buffer ) const { do_move ( in_buffer, out_buffer ); }
+        void BF_NOTHROWNOALIAS destroy( function_buffer       & buffer                                  ) const { do_destroy( buffer );              }
 
         // The possibly-decorated-invoker-wrapper is not used here because MSVC
         // (9.0 SP1) needlessly copy-constructs the returned typed_functor

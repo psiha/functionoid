@@ -46,7 +46,8 @@ namespace detail
     #define BF_CDECL    __cdecl
     #define BF_FASTCALL __fastcall
 
-    #define BF_RESTRICT __restrict
+    #define BF_POINTER_RESTRICT   __restrict
+    #define BF_REFERENCE_RESTRICT
 
     #define BF_FORCEINLINE __forceinline
     #define BF_NOINLINE    __declspec( noinline )
@@ -84,7 +85,8 @@ namespace detail
     #define BF_CDECL    __attribute__(( cdecl    ))
     #define BF_FASTCALL __attribute__(( fastcall ))
 
-    #define BF_RESTRICT
+    #define BF_POINTER_RESTRICT   __restrict
+    #define BF_REFERENCE_RESTRICT __restrict
 
     #ifdef _DEBUG
         #define BF_FORCEINLINE inline
@@ -124,7 +126,8 @@ namespace detail
     #define BF_CDECL    __cdecl
     #define BF_FASTCALL __fastcall
 
-    #define BF_RESTRICT
+    #define BF_POINTER_RESTRICT
+    #define BF_REFERENCE_RESTRICT
 
     #define BF_FORCEINLINE inline
     #define BF_NOINLINE
@@ -153,7 +156,8 @@ namespace detail
     #define BF_CDECL
     #define BF_FASTCALL
 
-    #define BF_RESTRICT
+    #define BF_POINTER_RESTRICT
+    #define BF_REFERENCE_RESTRICT
 
     #define BF_FORCEINLINE inline
     #define BF_NOINLINE
