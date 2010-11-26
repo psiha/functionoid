@@ -71,8 +71,8 @@ namespace detail
     #define BF_NOVTABLE
     #define BF_NOTHROW                  __attribute__(( nothrow ))
     #define BF_NOALIAS
-    #define BF_NOTHROWNOALIAS           NOTHROW
-    #define BF_NOTHROWNORESTRICTNOALIAS NOTHROW
+    #define BF_NOTHROWNOALIAS           BF_NOTHROW
+    #define BF_NOTHROWNORESTRICTNOALIAS BF_NOTHROW
 
     #define BF_HAS_NOTHROW
 
@@ -118,8 +118,8 @@ namespace detail
     #define BF_NOVTABLE
     #define BF_NOTHROW
     #define BF_NOALIAS
-    #define BF_NOTHROWNOALIAS           NOTHROW
-    #define BF_NOTHROWNORESTRICTNOALIAS NOTHROW
+    #define BF_NOTHROWNOALIAS           BF_NOTHROW
+    #define BF_NOTHROWNORESTRICTNOALIAS BF_NOTHROW
 
     #define BF_SELECTANY
 
@@ -148,8 +148,8 @@ namespace detail
     #define BF_NOVTABLE
     #define BF_NOTHROW
     #define BF_NOALIAS
-    #define BF_NOTHROWNOALIAS           NOTHROW
-    #define BF_NOTHROWNORESTRICTNOALIAS NOTHROW
+    #define BF_NOTHROWNOALIAS           BF_NOTHROW
+    #define BF_NOTHROWNORESTRICTNOALIAS BF_NOTHROW
 
     #define BF_SELECTANY
 
