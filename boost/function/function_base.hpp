@@ -7,7 +7,7 @@
 ///
 ///  Copyright (c) Douglas Gregor  2001-2006
 ///  Copyright (c) Emil Dotchevski 2007
-///  Copyright (c) Domagoj Saric   2010
+///  Copyright (c) Domagoj Saric   2010-2011
 ///
 ///  Use, modification and distribution is subject to the Boost Software
 ///  License, Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
@@ -304,11 +304,17 @@ namespace boost {
        */
 
       // http://msdn.microsoft.com/en-us/library/5ft82fed(VS.80).aspx (ad unions)
-
+      //...zzz...G++4.5.1/MinGW is reported to fail because of invalid use of
+      //...zzz...restrict for function pointers and because of converting a
+      //...zzz...restrict-qualified pointer to a non-restrict-qualified when
+      //...zzz...returning from a function (manager_ptr::functor_ptr)...
+      //...zzz...unable to reproduce this with GCC (4.0, 4.2, 4.5.3, 4.6.0) or
+      //...zzz...Clang on OS X...commenting out until investigated and
+      //...zzz...resolved...
       union function_buffer
       {
         // For pointers to function objects
-        void * BF_POINTER_RESTRICT obj_ptr;
+        void * /*BF_POINTER_RESTRICT*/ obj_ptr;
 
         //  For 'trivial' function objects (that can be managed without type
         // information) that must be allocated on the heap (we must only save
@@ -320,12 +326,12 @@ namespace boost {
         } trivial_heap_obj;
 
         // For function pointers of all kinds
-        void (* BF_POINTER_RESTRICT func_ptr)();
+        void (* /*BF_POINTER_RESTRICT*/ func_ptr)();
 
         // For bound member pointers
         struct bound_memfunc_ptr_t {
           class X;
-          void (X::* BF_POINTER_RESTRICT memfunc_ptr)(int);
+          void (X::* /*BF_POINTER_RESTRICT*/ memfunc_ptr)(int);
           void * obj_ptr;
         } bound_memfunc_ptr;
 
