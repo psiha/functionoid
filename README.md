@@ -13,7 +13,8 @@ http://thread.gmane.org/gmane.comp.lib.boost.devel/194514/focus=195351
 http://article.gmane.org/gmane.comp.lib.boost.devel/196906.
 
 Currently this (alternate) code is based on original code from the
-boost::function official 1.43 release. For the originial documentation see
+boost::function official 1.43 release (but it has been rebased on the current master
+as part of the move from the sandbox to github). For the originial documentation see
 http://www.boost.org/doc/libs/1_43_0/doc/html/function.html.
 
 It was tested (compiling and running real world projects, building Boost and
