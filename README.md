@@ -12,6 +12,16 @@ http://lists.boost.org/Archives/boost/2010/10/172593.php
 http://thread.gmane.org/gmane.comp.lib.boost.devel/194514/focus=195351
 http://article.gmane.org/gmane.comp.lib.boost.devel/196906.
 
+Related undertakings:
+- https://github.com/mamedev/delegates
+- http://www.codeproject.com/Articles/7150/Member-Function-Pointers-and-the-Fastest-Possible
+- http://www.codeproject.com/Articles/11015/The-Impossibly-Fast-C-Delegates
+- http://www.codeproject.com/Articles/18389/Fast-C-Delegate-Boost-Function-drop-in-replacement
+- http://www.codeproject.com/Articles/13287/Fast-C-Delegate
+- http://stackoverflow.com/questions/4298408/5-years-later-is-there-something-better-than-the-fastest-possible-c-delegate
+- http://www.gamedev.net/topic/549468-fast-c-delegates/
+- http://codereview.stackexchange.com/questions/14730/impossibly-fast-delegate-in-c11
+
 Currently this (alternate) code is based on original code from the
 boost::function official 1.43 release (but it has been rebased on the current master
 as part of the move from the sandbox to github). For the originial documentation see
