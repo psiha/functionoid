@@ -1,7 +1,7 @@
 
 An alternate boost::function implementation that
 - minimizes template and RTTI bloat
-- has (much) less (run)time overhead (for invocation, copy-construction and assignment)
+- has (much) less runtime overhead (for invocation, copy-construction and assignment)
 - provides configurability through policies.
 
 It is intended to be a drop-in replacement hence the same folder name as the
@@ -21,6 +21,11 @@ Related undertakings:
 - http://stackoverflow.com/questions/4298408/5-years-later-is-there-something-better-than-the-fastest-possible-c-delegate
 - http://www.gamedev.net/topic/549468-fast-c-delegates/
 - http://codereview.stackexchange.com/questions/14730/impossibly-fast-delegate-in-c11
+- move-only problem:
+  - http://lwg.github.io/issues/lwg-defects.html#1287
+  - http://stackoverflow.com/questions/25330716/move-only-version-of-stdfunction
+  - https://groups.google.com/forum/#!topic/comp.lang.c++.moderated/OFAMx695NJg
+  - https://groups.google.com/a/isocpp.org/forum/#!topic/std-proposals/hFBaATcX0Wo
 
 Currently this (alternate) code is based on original code from the
 boost::function official 1.43 release (but it has been rebased on the current master
@@ -44,9 +49,9 @@ interface that the user sees and the code that exists and executes _before_ the
 call through a function pointer in the vtable (e.g. the code in operator()
 before the invoke call is made, or code in operator= before calls to the manager
 are made ...)
- - the "back side" or that which stands behind the 'function pointer brick wall'
-(the actual invoker and the actual manager), which changes with each
-assignement, which, at the point of change or creation has all the type
+ - the "back side" or that which stands behind the 'function pointer brick wall'/
+'type erasure' (the actual invoker and the actual manager), which changes with
+each assignement, which, at the point of change or creation has all the type
 information it wants.
 
 A few more notes:
