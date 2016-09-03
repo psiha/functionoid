@@ -21,6 +21,7 @@ Related undertakings:
 - http://stackoverflow.com/questions/4298408/5-years-later-is-there-something-better-than-the-fastest-possible-c-delegate
 - http://www.gamedev.net/topic/549468-fast-c-delegates/
 - http://codereview.stackexchange.com/questions/14730/impossibly-fast-delegate-in-c11
+- https://probablydance.com/2013/01/13/a-faster-implementation-of-stdfunction
 - move-only problem:
   - http://lwg.github.io/issues/lwg-defects.html#1287
   - http://stackoverflow.com/questions/25330716/move-only-version-of-stdfunction
