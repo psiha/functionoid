@@ -2,8 +2,8 @@
 ///
 /// Boost.Functionoid library
 /// 
-/// \file policies.hpp
-/// ------------------
+/// \file rtti.hpp
+/// --------------
 ///
 ///  Copyright (c) Domagoj Saric 2010 - 2016
 ///
@@ -16,8 +16,10 @@
 ////////////////////////////////////////////////////////////////////////////////
 #pragma once
 
-#include <boost/core/typeinfo.hpp>
 #include <boost/config.hpp>
+#include <boost/core/ignore_unused.hpp>
+#include <boost/core/ref.hpp>
+#include <boost/core/typeinfo.hpp>
 #include <boost/function_equal.hpp>
 #include <boost/throw_exception.hpp>
 
@@ -29,285 +31,154 @@
 namespace boost
 {
 //------------------------------------------------------------------------------
+template <typename T> struct is_reference_wrapper<std::reference_wrapper<T>               > : std::true_type {};
+template <typename T> struct is_reference_wrapper<std::reference_wrapper<T> const         > : std::true_type {};
+template <typename T> struct is_reference_wrapper<std::reference_wrapper<T> volatile      > : std::true_type {};
+template <typename T> struct is_reference_wrapper<std::reference_wrapper<T> const volatile> : std::true_type {};
+//------------------------------------------------------------------------------
 namespace functionoid
 {
 //------------------------------------------------------------------------------
 
+// For transferring stored function object type information back to the
+// interface side.
+class typed_functor
+{
+public:
+    typed_functor( typed_functor const & ) = delete;
+    typed_functor( typed_functor      && ) = default;
+
+    template <typename Functor>
+    typed_functor( Functor & functor ) noexcept
+        :
+        p_functor_         ( std::addressof   ( functor )       ),
+        type_id_           ( BOOST_CORE_TYPEID( Functor )       ),
+        const_qualified_   ( std::is_const     <Functor>::value ),
+        volatile_qualified_( std::is_volatile  <Functor>::value )
+    {}
+
+    core::typeinfo const & functor_type_info() const noexcept { return type_id_; }
+
+    template <typename Functor>
+    Functor * BF_FASTCALL target() noexcept
+    {
+        return static_cast<Functor *>
+        (
+            get_functor_if_types_match
+            (
+                BOOST_CORE_TYPEID( Functor ),
+                std::is_const     <Functor>::value,
+                std::is_volatile  <Functor>::value
+            )
+        );
+    }
+
+private:
+    void * BF_FASTCALL get_functor_if_types_match
+    (
+        core::typeinfo const & other,
+        bool const other_const_qualified,
+        bool const other_volatile_qualified
+    ) const noexcept
+    {
+        // Check whether we have the same type. We can add
+        // cv-qualifiers, but we can't take them away.
+        bool const types_match
+        (
+            type_id_ == other
+                &
+            ( !const_qualified_ | other_const_qualified )
+                &
+            ( !volatile_qualified_ | other_volatile_qualified )
+        );
+        return types_match ? const_cast<void *>( p_functor_ ) : nullptr;
+    }
+
+private:
+    void           const * const p_functor_;
+    core::typeinfo const &       type_id_;
+    // Whether the type is const-qualified.
+    bool const const_qualified_;
+    // Whether the type is volatile-qualified.
+    bool const volatile_qualified_;
+}; // class typed_functor
+
 namespace detail
 {
-    // For transferring stored function object type information back to the
-    // interface side.
-    class typed_functor
-        // Implementation note:
-        //   GCC, Clang and VisualAge seem to have serious RVO problems. Because
-        // it looks like a widespread problem (and because it is used only as a
-        // redundant-copy detection tool), noncopyable is used only with compilers
-        // that are known to be able to work/compile with it.
-        //                                      (04.11.2010.) (Domagoj Saric)
-#if defined( BOOST_MSVC ) || defined( __SUNPRO_CC )
-        : noncopyable
-#endif // __GNUC__
-    {
-    public:
-        template <typename Functor>
-        typed_functor( Functor & functor )
-            :
-            pFunctor( boost::addressof( functor ) ),
-            type_id( BOOST_SP_TYPEID( Functor ) ),
-            const_qualified( is_const   <Functor>::value ),
-            volatile_qualified( is_volatile<Functor>::value )
-        {}
+    union function_buffer_base;
 
-        core::typeinfo const & functor_type_info() const { return type_id; }
-
-        template <typename Functor>
-        Functor * target()
-        {
-            return static_cast<Functor *>
-                   (
-                       get_functor_if_types_match
-                       (
-                           BOOST_SP_TYPEID( Functor ),
-                           is_const   <Functor>::value,
-                           is_volatile<Functor>::value
-                       )
-                   );
-        }
-
-    private:
-        void * get_functor_if_types_match
-        (
-          core::typeinfo const & other,
-          bool const other_const_qualified,
-          bool const other_volatile_qualified
-        )
-        {
-            // Check whether we have the same type. We can add
-            // cv-qualifiers, but we can't take them away.
-            bool const types_match
-            (
-              BOOST_FUNCTION_COMPARE_TYPE_ID( type_id, other )
-                  &&
-              ( !const_qualified || other_const_qualified )
-                  &&
-              ( !volatile_qualified || other_volatile_qualified )
-            );
-            return types_match ? const_cast<void *>( pFunctor ) : 0;
-        }
-
-    private:
-        void           const * const pFunctor;
-        core::typeinfo const &       type_id;
-        // Whether the type is const-qualified.
-        bool const const_qualified;
-        // Whether the type is volatile-qualified.
-        bool const volatile_qualified;
-    };
-
-    ///  A helper class that can construct a typed_functor object from a
+    /// A helper class that can construct a typed_functor object from a
     /// function_buffer instance for given template parameters.
     template
     <
         typename ActualFunctor,
         typename StoredFunctor,
-        class FunctorManager
+        typename FunctorManager
     >
     class functor_type_info
     {
     private:
-        static ActualFunctor * actual_functor_ptr( StoredFunctor * pStoredFunctor, mpl::true_ /*is_ref_wrapper*/, mpl::false_ /*is_member_pointer*/ )
+        static ActualFunctor * actual_functor_ptr( StoredFunctor * const pStoredFunctor, std::true_type /*is_ref_wrapper*/, std::false_type /*is_member_pointer*/ ) noexcept
         {
             // needed when StoredFunctor is a static reference
-            ignore_unused_variable_warning( pStoredFunctor );
+            ignore_unused( pStoredFunctor );
             return pStoredFunctor->get_pointer();
         }
 
-        static ActualFunctor * actual_functor_ptr( StoredFunctor * pStoredFunctor, mpl::false_ /*is_ref_wrapper*/, mpl::true_ /*is_member_pointer*/ )
+        static ActualFunctor * actual_functor_ptr( StoredFunctor * const pStoredFunctor, std::false_type /*is_ref_wrapper*/, std::true_type /*is_member_pointer*/ ) noexcept
         {
-            BOOST_STATIC_ASSERT( sizeof( StoredFunctor ) == sizeof( ActualFunctor ) );
+            static_assert( sizeof( StoredFunctor ) == sizeof( ActualFunctor ), "" );
             return static_cast<ActualFunctor *>( static_cast<void *>( pStoredFunctor ) );
         }
 
-        static ActualFunctor * actual_functor_ptr( StoredFunctor * pStoredFunctor, mpl::false_ /*is_ref_wrapper*/, mpl::false_ /*is_member_pointer*/ )
+        static ActualFunctor * actual_functor_ptr( StoredFunctor * const pStoredFunctor, std::false_type /*is_ref_wrapper*/, std::false_type /*is_member_pointer*/ ) noexcept
         {
-            BOOST_STATIC_ASSERT
-            ( (
-                ( is_same<typename remove_cv<ActualFunctor>::type, StoredFunctor>::value ) ||
-                (
-                    is_msvc_exception_specified_function_pointer<ActualFunctor>::value &&
-                    is_msvc_exception_specified_function_pointer<StoredFunctor>::value &&
-                    sizeof( ActualFunctor ) == sizeof( StoredFunctor )
-                    )
-                ) );
             return pStoredFunctor;
         }
+
     public:
-        // See the related comment in the vtable struct definition.
-#ifdef __GNUC__
-        static typed_functor             get_typed_functor( function_buffer const & buffer )
-#else
-        static typed_functor BF_FASTCALL get_typed_functor( function_buffer const & buffer )
-#endif
+        static typed_functor BF_FASTCALL get_typed_functor( function_buffer_base const & buffer ) noexcept
         {
-            StoredFunctor * const pStoredFunctor( FunctorManager::functor_ptr( const_cast<function_buffer &>( buffer ) ) );
-            ActualFunctor * const pActualFunctor( actual_functor_ptr( pStoredFunctor, is_reference_wrapper<StoredFunctor>(), is_member_pointer<ActualFunctor>() ) );
+            auto          * const pFunctor      ( FunctorManager::functor_ptr( const_cast<function_buffer_base &>( buffer ) ) );
+            StoredFunctor * const pStoredFunctor( static_cast<StoredFunctor *>( static_cast<void *>( pFunctor ) ) );
+            ActualFunctor * const pActualFunctor( actual_functor_ptr( pStoredFunctor, std::integral_constant<bool, is_reference_wrapper<StoredFunctor>::value>(), std::is_member_pointer<ActualFunctor>() ) );
             return typed_functor( *pActualFunctor );
         }
-    };
+    }; // functor_type_info
 
-    // A helper wrapper class that adds type information functionality (e.g.
-    // for non typed/trivial managers).
-    template
-    <
-        class FunctorManager,
-        typename ActualFunctor,
-        typename StoredFunctor = typename FunctorManager::Functor
-    >
-    struct typed_manager
-        :
-        FunctorManager,
-        functor_type_info<ActualFunctor, StoredFunctor, typed_manager<FunctorManager, ActualFunctor, StoredFunctor> >
-    {
-        typedef StoredFunctor Functor;
-        static StoredFunctor * functor_ptr( function_buffer & buffer ) { return static_cast<StoredFunctor *>( static_cast<void *>( FunctorManager::functor_ptr( buffer ) ) ); }
-    }; 
-
-      /// Metafunction for retrieving an appropriate fully typed functor manager.
-      template<typename ActualFunctor, typename StoredFunctor, typename Allocator>
-      struct get_typed_functor_manager
-      {
-          typedef typed_manager
-                  <
-                    typename get_functor_manager<StoredFunctor, Allocator>::type,
-                    ActualFunctor,
-                    StoredFunctor
-                  > type;
-      };
-
-      /// Retrieve the type of the stored function object.
-      core::typeinfo const & target_type() const
-      {
-          return get_vtable().get_typed_functor( this->functor_ ).functor_type_info();
-      }
-
-      template <typename Functor>
-      Functor * target()
-      {
-          return get_vtable().get_typed_functor( this->functor_ ).target<Functor>();
-      }
-
-      template <typename Functor>
-      Functor const * target() const
-      {
-          return const_cast<function_base &>( *this ).target<Functor const>();
-      }
-
-      template<typename F>
-      bool contains( const F& f ) const
-      {
-          if ( auto const p_f = this->template target<F>() )
-          {
-              return function_equal( *p_f, f );
-          }
-          return false;
-      }
+    template <typename Traits>
+    class function_base;
 } // namespace detail
 
-#if 0
-inline bool operator==( const Function& f, detail::function::useless_clear_type* )
-{
-    return f.empty();
-}
+template <typename Signature, typename Traits>
+class callable;
 
-BOOST_FUNCTION_ENABLE_IF_FUNCTION
-inline operator!=( const Function& f, detail::function::useless_clear_type* )
-{
-    return !f.empty();
-}
+template <typename Signature, typename Traits, typename Functor> bool operator==( callable<Signature, Traits> const & f, std::nullptr_t ) { return f.empty(); }
+template <typename Signature, typename Traits, typename Functor> bool operator==( std::nullptr_t, callable<Signature, Traits> const & f ) { return f.empty(); }
 
-BOOST_FUNCTION_ENABLE_IF_FUNCTION
-inline operator==( detail::function::useless_clear_type*, const Function& f )
-{
-    return f.empty();
-}
+template <typename Signature, typename Traits, typename Functor> bool operator!=( callable<Signature, Traits> const & f, std::nullptr_t ) { return !f.empty(); }
+template <typename Signature, typename Traits, typename Functor> bool operator!=( std::nullptr_t, callable<Signature, Traits> const & f ) { return !f.empty(); }
 
-BOOST_FUNCTION_ENABLE_IF_FUNCTION
-inline operator!=( detail::function::useless_clear_type*, const Function& f )
-{
-    return !f.empty();
-}
-template<typename Functor>
-BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL( Functor, bool )
-operator==( const function_base& f, Functor g )
-{
-    if ( const Functor* fp = f.template target<Functor>() )
-        return function_equal( *fp, g );
-    else return false;
-}
 
-template<typename Functor>
-BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL( Functor, bool )
-operator==( Functor g, const function_base& f )
-{
-    if ( const Functor* fp = f.template target<Functor>() )
-        return function_equal( g, *fp );
-    else return false;
-}
+template <typename Traits, typename Functor> bool operator==( detail::function_base<Traits> const & f, Functor & g ) { return f.contains( g ); }
+template <typename Traits, typename Functor> bool operator==( Functor & g, detail::function_base<Traits> const & f ) { return f == g; }
 
-template<typename Functor>
-BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL( Functor, bool )
-operator!=( const function_base& f, Functor g )
-{
-    if ( const Functor* fp = f.template target<Functor>() )
-        return !function_equal( *fp, g );
-    else return true;
-}
+template <typename Traits, typename Functor> bool operator!=( detail::function_base<Traits> const & f, Functor g ) { return !f.contains( g ); }
+template <typename Traits, typename Functor> bool operator!=( Functor g, detail::function_base<Traits> const & f ) { return f != g; }
 
-template<typename Functor>
-BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL( Functor, bool )
-operator!=( Functor g, const function_base& f )
+template <typename Traits, typename Functor>
+bool operator==( detail::function_base<Traits> const & f, reference_wrapper<Functor> const g )
 {
-    if ( const Functor* fp = f.template target<Functor>() )
-        return !function_equal( g, *fp );
-    else return true;
+    auto const p_f( f. template target<Functor>() );
+    return p_f == g.get_pointer();
 }
-template<typename Functor>
-BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL( Functor, bool )
-operator==( const function_base& f, reference_wrapper<Functor> g )
-{
-    if ( const Functor* fp = f.template target<Functor>() )
-        return fp == g.get_pointer();
-    else return false;
-}
+template <typename Traits, typename Functor>
+bool operator==( reference_wrapper<Functor> const g, detail::function_base<Traits> const & f ) { return f == g; }
 
-template<typename Functor>
-BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL( Functor, bool )
-operator==( reference_wrapper<Functor> g, const function_base& f )
-{
-    if ( const Functor* fp = f.template target<Functor>() )
-        return g.get_pointer() == fp;
-    else return false;
-}
-
-template<typename Functor>
-BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL( Functor, bool )
-operator!=( const function_base& f, reference_wrapper<Functor> g )
-{
-    if ( const Functor* fp = f.template target<Functor>() )
-        return fp != g.get_pointer();
-    else return true;
-}
-
-template<typename Functor>
-BOOST_FUNCTION_ENABLE_IF_NOT_INTEGRAL( Functor, bool )
-operator!=( reference_wrapper<Functor> g, const function_base& f )
-{
-    if ( const Functor* fp = f.template target<Functor>() )
-        return g.get_pointer() != fp;
-    else return true;
-}
-#endif
-
+template <typename Traits, typename Functor>
+bool operator!=( detail::function_base<Traits> const & f, reference_wrapper<Functor> const g ) { return !( f == g ); }
+template <typename Traits, typename Functor>
+bool operator!=( reference_wrapper<Functor> const g, detail::function_base<Traits> const & f ) { return f != g; }
 
 //------------------------------------------------------------------------------
 } // namespace functionoid

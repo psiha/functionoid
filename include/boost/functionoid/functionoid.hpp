@@ -24,6 +24,8 @@
 #include <boost/throw_exception.hpp>
 
 #include "detail/platform_specifics.hpp"
+#include "policies.hpp"
+#include "rtti.hpp"
 
 #include <stdexcept>
 #include <cstddef>
@@ -39,50 +41,31 @@
 #   pragma warning( disable : 4610 ) // "class can never be instantiated - user defined constructor required" (boost::detail::function::vtable)
 #   pragma warning( disable : 4793 ) // complaint about native code generation
 #endif       
-
-// Implementation note:
-//   BOOST_FUNCTION_TARGET_FIX is still required by tests.
-//                                            (03.11.2010.) (Domagoj Saric)
-#if defined(BOOST_MSVC) && BOOST_MSVC <= 1300 || defined(__ICL) && __ICL <= 600 || defined(__MWERKS__) && __MWERKS__ < 0x2406 && !defined(BOOST_STRICT_CONFIG)
-#  define BOOST_FUNCTION_TARGET_FIX(x) x
-#else
-#  define BOOST_FUNCTION_TARGET_FIX(x)
-#endif // not MSVC
 //------------------------------------------------------------------------------
 namespace boost
 {
 //------------------------------------------------------------------------------
-
 template <typename T> class reference_wrapper;
-
+//------------------------------------------------------------------------------
 namespace functionoid
 {
 //------------------------------------------------------------------------------
 
 struct default_traits;
 
+class typed_functor;
 
 template <typename Signature, typename Traits = default_traits>
 class callable;
 
 namespace detail
 {
+    // http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0302r0.html Deprecating Allocator Support in std::function
     using dummy_allocator = std::allocator<void *>;
 
-    struct thiscall_optimization_available_helper
-    {
-		using free_function  = void (                                        *)();
-		using bound_function = void (thiscall_optimization_available_helper::*)();
-
-        static constexpr bool value = ( sizeof( thiscall_optimization_available_helper::free_function ) == sizeof( thiscall_optimization_available_helper::bound_function ) );
-    };
-	using thiscall_optimization_available = std::bool_constant<thiscall_optimization_available_helper::value>;
-
-    // A buffer used to store small function objects in
-    // boost::function. It is a union containing function pointers,
-    // object pointers, and a structure that resembles a bound
-    // member function pointer.
-
+    // Basic buffer used to store small function objects in a functionoid. It is
+    // a union containing function pointers, object pointers, and a structure
+    // that resembles a bound member function pointer.
 	union function_buffer_base
 	{
 		// For pointers to function objects
@@ -94,44 +77,40 @@ namespace detail
 		struct trivial_heap_obj_t
 		{
 			void * __restrict ptr;
-			std::size_t       size;   // in number of bytes
+			std::size_t       size; // in number of bytes
 		} trivial_heap_obj;
 
 		// For function pointers of all kinds
-		void(*func_ptr)();
+		void (*func_ptr)();
 
 		// For bound member pointers
 		struct bound_memfunc_ptr_t
 		{
 			class X;
-			void  (X::* memfunc_ptr)();
-			void* obj_ptr;
+			void (X::* memfunc_ptr)();
+			X * obj_ptr;
 		} bound_memfunc_ptr;
-	}; // function_buffer_base
+	}; // union function_buffer_base
 
 	template <std::uint8_t Size, std::uint8_t Alignment>
 	union alignas( Alignment ) function_buffer
 	{
 		function_buffer_base base;
-		char bytes[Size];
+		char bytes[ Size ];
 
 			      operator function_buffer_base       && () &&    noexcept { return std::move( base ); }
 		          operator function_buffer_base       &  ()       noexcept { return base; }
 		constexpr operator function_buffer_base const &  () const noexcept { return base; }
-	};
+
+        static function_buffer       & from_base( function_buffer_base       & base ) noexcept { return reinterpret_cast<function_buffer       &>( base ); }
+        static function_buffer const & from_base( function_buffer_base const & base ) noexcept { return reinterpret_cast<function_buffer const &>( base ); }
+	}; // union function_buffer
 
 	// Check that all function_buffer "access points" are actually at the same
 	// address/offset.
 	static_assert( offsetof( function_buffer_base, obj_ptr           ) == offsetof( function_buffer_base, func_ptr ), "" );
 	static_assert( offsetof( function_buffer_base, bound_memfunc_ptr ) == offsetof( function_buffer_base, func_ptr ), "" );
 	static_assert( offsetof( function_buffer_base::bound_memfunc_ptr_t, memfunc_ptr ) == 0, "" );
-
-    // A simple wrapper to allow deriving and a thiscall invoker.
-	template <std::uint8_t Size, std::uint8_t Alignment>
-    struct function_buffer_holder
-	{
-		function_buffer<Size, Alignment> buffer;
-	};
 
     // Tags used to decide between different types of functions
     struct function_ptr_tag     {};
@@ -145,19 +124,17 @@ namespace detail
     // is_function no longer recognize them. This tester is a workaround that
     // seems to work well enough for now.
     template <typename T>
-    struct is_msvc_exception_specified_function_pointer
-        :
-        public std::bool_constant
-        <
-        #ifdef _MSC_VER
-            !std::is_class      <T>::value &&
-            !std::is_fundamental<T>::value &&
-            ( sizeof( T ) == sizeof( void (*) (void) ) )
-        #else
-            false
-        #endif
-        >
-    {};
+    using is_msvc_exception_specified_function_pointer = std::integral_constant
+    <
+        bool,
+    #ifdef _MSC_VER
+        !std::is_class      <T>::value &&
+        !std::is_fundamental<T>::value &&
+        ( sizeof( T ) == sizeof( void (*)() ) )
+    #else
+        false
+    #endif
+    >;
 
     template <typename F>
     struct get_function_tag
@@ -189,7 +166,7 @@ namespace detail
 		F const & functor  () const { return *this; }
 		A       & allocator()       { return *this; }
 		A const & allocator() const { return *this; }
-    };
+    }; // struct functor_and_allocator
 
     template <typename Functor, typename Buffer>
     struct functor_traits
@@ -218,12 +195,11 @@ namespace detail
     /// Manager for trivial objects that fit into sizeof( void * ).
     struct manager_ptr
     {
-    public:
         static void       *       * functor_ptr( function_buffer_base       & buffer ) {                              return &buffer.obj_ptr; }
         static void const * const * functor_ptr( function_buffer_base const & buffer ) { BF_ASSUME( buffer.obj_ptr ); return &buffer.obj_ptr; }
 
         template <typename Functor, typename Allocator>
-        static void assign( Functor const functor, function_buffer_base & out_buffer, Allocator )
+        static void assign( Functor const functor, function_buffer_base & out_buffer, Allocator ) noexcept
         {
             static_assert( functor_traits<Functor, function_buffer_base>::allowsPtrObjectOptimization, "" );
             new ( functor_ptr( out_buffer ) ) Functor( functor );
@@ -252,7 +228,6 @@ namespace detail
 	template <typename Buffer>
     struct manager_trivial_small
     {
-    public:
         static void * functor_ptr( function_buffer_base & buffer ) { return &buffer; }
 
         template <typename Functor, typename Allocator>
@@ -266,20 +241,20 @@ namespace detail
             new ( functor_ptr( out_buffer ) ) Functor( functor );
         }
 
-        static void BF_FASTCALL clone( Buffer const & __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept
+        static void BF_FASTCALL clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
         {
-            assign( in_buffer, out_buffer, dummy_allocator() );
+            assign( Buffer::from_base( in_buffer ), Buffer::from_base( out_buffer ), dummy_allocator() );
         }
 
-        static void BF_FASTCALL move( Buffer && __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept
+        static void BF_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
         {
             clone( in_buffer, out_buffer );
             destroy( in_buffer );
         }
 
-        static void BF_FASTCALL destroy( Buffer & buffer ) noexcept
+        static void BF_FASTCALL destroy( function_buffer_base & buffer ) noexcept
         {
-            debug_clear( buffer );
+            debug_clear( Buffer::from_base( buffer ) );
         }
     }; // struct manager_trivial_small
 
@@ -299,7 +274,7 @@ namespace detail
         static void assign( Functor const & functor, function_buffer_base & out_buffer, Allocator const a )
         {
             BOOST_ASSERT( a == trivial_allocator() );
-            boost::ignore_unused( a );
+            ignore_unused( a );
 
             static_assert
             (
@@ -343,35 +318,35 @@ namespace detail
     template <typename FunctorParam, typename Buffer>
     struct manager_small
     {
-    public:
         using Functor = FunctorParam;
-v
+
         static Functor       * functor_ptr( function_buffer_base       & buffer ) { return static_cast<Functor *>( manager_trivial_small<Buffer>::functor_ptr( buffer ) ); }
         static Functor const * functor_ptr( function_buffer_base const & buffer ) { return functor_ptr( const_cast<function_buffer_base &>( buffer ) ); }
 
         template <typename F, typename Allocator>
-        static void assign( F && functor, Buffer & out_buffer, Allocator )
+        static void assign( F && functor, Buffer & out_buffer, Allocator ) noexcept( noexcept( Functor( std::forward<F>( functor ) ) ) )
         {
             new ( functor_ptr( out_buffer ) ) Functor( std::forward<F>( functor ) );
         }
 
-        static void BF_FASTCALL clone( Buffer const & in_buffer, Buffer & out_buffer )
+        static void BF_FASTCALL clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer ) noexcept( std::is_nothrow_copy_constructible<Functor>::value )
         {
             Functor const & in_functor( *functor_ptr( in_buffer ) );
-            assign( in_functor, out_buffer, dummy_allocator() );
+            assign( Buffer::from_base( in_functor ), Buffer::from_base( out_buffer ), dummy_allocator() );
         }
 
-        static void BF_FASTCALL move( Buffer && __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept
+        static void BF_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept( std::is_nothrow_move_constructible<Functor>::value )
         {
             auto & __restrict in_functor( *functor_ptr( in_buffer ) );
-            assign( std::move( in_functor ), out_buffer, dummy_allocator() );
+            assign( std::move( in_functor ), Buffer::from_base( out_buffer ), dummy_allocator() );
             destroy( in_buffer );
         }
 
-        static void BF_FASTCALL destroy( Buffer & buffer ) noexcept
+        static void BF_FASTCALL destroy( function_buffer_base & buffer ) noexcept ( std::is_nothrow_destructible<Functor>::value )
         {
-            functor_ptr( buffer )->~Functor();
-            debug_clear( *functor_ptr( buffer ) );
+            auto & __restrict functor( *functor_ptr( buffer ) );
+            functor.~Functor();
+            debug_clear( functor );
         }
     }; // struct manager_small
 
@@ -404,8 +379,9 @@ v
 		template <typename F>
         static void assign( F && functor, function_buffer_base & out_buffer, OriginalAllocator source_allocator )
         {
-            using does_not_need_guard_t = std::bool_constant
+            using does_not_need_guard_t = std::integral_constant
             <
+                bool,
 				std::is_nothrow_copy_constructible<Functor          >::value &&
 				std::is_nothrow_copy_constructible<OriginalAllocator>::value
             >;
@@ -430,7 +406,7 @@ v
             manager_trivial_heap<OriginalAllocator>::move( std::move( in_buffer ), out_buffer );
         }
 
-        static void BF_FASTCALL destroy( function_buffer_base & buffer ) noexcept
+        static void BF_FASTCALL destroy( function_buffer_base & buffer ) noexcept( std::is_nothrow_destructible<Functor>::value )
         {
             functor_and_allocator_t & in_functor_and_allocator( *functor_ptr( buffer ) );
 
@@ -466,20 +442,7 @@ v
             //...zzz...functor_ptr( out_buffer ) = release( p_placeholder );
             out_buffer.trivial_heap_obj.ptr = release( p_placeholder );
         }
-
-		static constexpr auto clone_ptr_aux( std::true_type  ) { return &clone; }
-		static constexpr auto clone_ptr_aux( std::false_type ) { return nullptr; }
     }; // struct manager_generic
-
-	// Wrapper that adapts the function signatures for the vtable (for
-	// managers that unconditionally use function_buffer_base).
-	template <typename BaseManager, typename Buffer>
-	struct base_buffer_manager_adapter : BaseManager
-	{
-		static void clone  ( Buffer const &  __restrict in_buffer, Buffer & __restrict out_buffer )          { BaseManager::clone(            in_buffer  , out_buffer ); }
-		static void move   ( Buffer       && __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept { BaseManager::move ( std::move( in_buffer ), out_buffer ); }
-		static void destroy( Buffer       &  __restrict buffer                                    ) noexcept { BaseManager::destroy( buffer ); }
-	};
 
     // Helper metafunction for retrieving an appropriate functor manager.
     template
@@ -492,91 +455,221 @@ v
 		bool ptrSmall,
 		bool defaultAligned
     >
-    struct functor_manager
+    struct functor_manager_aux
     {
-        using type = base_buffer_manager_adapter<manager_generic<Functor, Allocator>, Buffer>;
+        using type = manager_generic<Functor, Allocator>;
     };
 
     template <typename Functor, typename Allocator, typename Buffer>
-    struct functor_manager<Functor, Allocator, Buffer, true, false, false, true>
+    struct functor_manager_aux<Functor, Allocator, Buffer, true, false, false, true>
     {
-        using type = base_buffer_manager_adapter
+        using type = typename std::conditional
 		<
-			typename std::conditional
-			<
-				//...zzz...is_stateless<Allocator>,
-				std::is_empty<Allocator>::value,
-				manager_trivial_heap<         Allocator>,
-				manager_generic     <Functor, Allocator>
-			>::type,
-			Buffer
-		>;
+			//...zzz...is_stateless<Allocator>,
+			std::is_empty<Allocator>::value,
+			manager_trivial_heap<         Allocator>,
+			manager_generic     <Functor, Allocator>
+		>::type;
     };
 
     template <typename Functor, typename Allocator, typename Buffer, bool defaultAligned>
-    struct functor_manager<Functor, Allocator, Buffer, true, true, false, defaultAligned>
+    struct functor_manager_aux<Functor, Allocator, Buffer, true, true, false, defaultAligned>
     {
         using type = manager_trivial_small<Buffer>;
     };
 
     template <typename Functor, typename Allocator, typename Buffer, bool smallObj, bool defaultAligned>
-    struct functor_manager<Functor, Allocator, Buffer, true, smallObj, true, defaultAligned>
+    struct functor_manager_aux<Functor, Allocator, Buffer, true, smallObj, true, defaultAligned>
     {
-        using type = base_buffer_manager_adapter<manager_ptr, Buffer>;
+        using type = manager_ptr;
     };
 
     template <typename Functor, typename Allocator, typename Buffer, bool ptrSmall, bool defaultAligned>
-    struct functor_manager<Functor, Allocator, Buffer, false, true, ptrSmall, defaultAligned>
+    struct functor_manager_aux<Functor, Allocator, Buffer, false, true, ptrSmall, defaultAligned>
     {
         using type = manager_small<Functor, Buffer>;
     };
 
     /// Metafunction for retrieving an appropriate functor manager with
     /// minimal type information.
-    template<typename StoredFunctor, typename Allocator, typename Buffer>
-    struct get_functor_manager
-    {
-        using type = typename functor_manager
-        <
-            StoredFunctor,
-            Allocator,
-			Buffer,
-            functor_traits<StoredFunctor, Buffer>::allowsPODOptimization,
-            functor_traits<StoredFunctor, Buffer>::allowsSmallObjectOptimization,
-            functor_traits<StoredFunctor, Buffer>::allowsPtrObjectOptimization,
-            functor_traits<StoredFunctor, Buffer>::hasDefaultAlignement
-        >::type;
-    };
-#if 0
-    /// Metafunction for retrieving an appropriate fully typed functor manager.
-    template<typename ActualFunctor, typename StoredFunctor, typename Allocator, typename Buffer>
-    struct get_typed_functor_manager
-    {
-        using type = typed_manager
-        <
-            typename get_functor_manager<StoredFunctor, Allocator, Buffer>::type,
-            ActualFunctor,
-            StoredFunctor
-        >;
-    };
-#endif
+    template <typename StoredFunctor, typename Allocator, typename Buffer>
+    using functor_manager = typename functor_manager_aux
+    <
+        StoredFunctor,
+        Allocator,
+		Buffer,
+        functor_traits<StoredFunctor, Buffer>::allowsPODOptimization,
+        functor_traits<StoredFunctor, Buffer>::allowsSmallObjectOptimization,
+        functor_traits<StoredFunctor, Buffer>::allowsPtrObjectOptimization,
+        functor_traits<StoredFunctor, Buffer>::hasDefaultAlignement
+    >::type;
 
+    /// \note MSVC (14 update 3 and 14.1 preview 5) ICE on function pointers
+    /// with conditional noexcept specifiers in a template context.
+    /// https://connect.microsoft.com/VisualStudio/feedback/details/3105692/ice-w-noexcept-function-pointer-in-a-template-context
+    /// Additionally this compiler generates bad binaries if function references
+    /// are used (instead of const pointers) by generating/storing 'null
+    /// references'.
+    ///                                       (14.10.2016.) (Domagoj Saric)
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) )
+    #define BOOST_AUX_NOEXCEPT_PTR( condition )
+#else
+    #define BOOST_AUX_NOEXCEPT_PTR( condition ) noexcept( condition )
+#endif // MSVC workaround
+
+    template <bool is_noexcept, typename ReturnType, typename ... InvokerArguments>
+    struct invoker
+    {
+        template <typename Manager, typename StoredFunctor> constexpr invoker( Manager const *, StoredFunctor const * ) noexcept : invoke( &invoke_impl<Manager, StoredFunctor> ) {}
+        ReturnType (BF_FASTCALL * __restrict const invoke)( function_buffer_base & __restrict buffer, InvokerArguments... args ) BOOST_AUX_NOEXCEPT_PTR( is_noexcept );
+
+        /// \note Defined here instead of within the callable template because
+        /// of MSVC14 deficiencies with noexcept( expr ) function pointers (to
+        /// enable the specialization workaround).
+        ///                                   (17.10.2016.) (Domagoj Saric)
+        template <typename FunctionObjManager, typename FunctionObj>
+		/// \note Argument order optimized for a pass-in-reg calling convention.
+		///                                   (17.10.2016.) (Domagoj Saric)
+		static ReturnType BF_FASTCALL invoke_impl( detail::function_buffer_base & buffer, InvokerArguments... args ) BOOST_AUX_NOEXCEPT_PTR( is_noexcept ) // MSVC14u3 and Xcode8 AppleClang barf @ ( noexcept( std::declval<FunctionObj>( args... ) ) )
+		{
+			// We provide the invoker with a manager with a minimum amount of
+			// type information (because it already knows the stored function
+			// object it works with, it only needs to get its address from a
+			// function_buffer object). Because of this we must cast the pointer
+			// returned by FunctionObjManager::functor_ptr() because it can be
+			// a plain void * in case of the trivial managers. In case of the
+			// trivial ptr manager it is even a void * * so a double static_cast
+			// (or a reinterpret_cast) is necessary.
+			auto & __restrict functionObject
+			(
+				*static_cast<FunctionObj *>
+				(
+					static_cast<void *>
+					(
+						FunctionObjManager::functor_ptr( buffer )
+					)
+				)
+			);
+            static_assert( noexcept( functionObject( args... ) ) >= is_noexcept, "Trying to assign a not-noexcept function object to a noexcept functionoid." );
+			return functionObject( args... );
+		}
+    }; // invoker
+
+    template <support_level Level>
+    struct destroyer
+    {
+        template <typename Manager> constexpr destroyer( Manager const * ) noexcept : destroy( &Manager::destroy ) {}
+        void (BF_FASTCALL * __restrict const destroy)( function_buffer_base & __restrict buffer ) BOOST_AUX_NOEXCEPT_PTR( Level >= support_level::nofail );
+    };
+    template <>
+    struct destroyer<support_level::trivial>
+    {
+        constexpr destroyer( void const * ) noexcept {}
+        static void BF_FASTCALL destroy( function_buffer_base & __restrict buffer ) noexcept { debug_clear( buffer ); }
+    };
+    template <>
+    struct destroyer<support_level::na> { constexpr destroyer( void const * ) noexcept {} };
+
+    template <support_level Level>
+    struct cloner
+    {
+        template <typename Manager> constexpr cloner( Manager const * ) noexcept : clone( &Manager::clone ) {}
+        void (BF_FASTCALL * __restrict const clone)( function_buffer_base const &  __restrict in_buffer, function_buffer_base & __restrict out_buffer ) BOOST_AUX_NOEXCEPT_PTR( Level >= support_level::nofail );
+    };
+    template <>
+    struct cloner<support_level::trivial>
+    {
+        constexpr cloner( void const * ) noexcept {}
+        static void BF_FASTCALL clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept { out_buffer = in_buffer; }
+    };
+    template <>
+    struct cloner<support_level::na> { constexpr cloner( void const * ) noexcept {} };
+
+    template <support_level Level>
+    struct mover
+    {
+        template <typename Manager> constexpr mover( Manager const * ) noexcept : move( &Manager::move ) {}
+        void (BF_FASTCALL * __restrict const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) BOOST_AUX_NOEXCEPT_PTR( Level >= support_level::nofail );
+    };
+    template <>
+    struct mover<support_level::trivial>
+    {
+        constexpr mover( void const * ) noexcept {}
+        static void BF_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept { cloner<support_level::trivial>::clone( in_buffer, out_buffer ); }
+    };
+    template <>
+    struct mover<support_level::na> { constexpr mover( void const * ) noexcept {} };
+
+    template <typename ActualFunctor, typename StoredFunctor, typename FunctorManager> class functor_type_info;
+    template <bool enabled>
+    struct reflector
+    {
+        template <typename Manager, typename ActualFunctor, typename StoredFunctor>
+        constexpr reflector( std::tuple<Manager, ActualFunctor, StoredFunctor> const * ) noexcept : get_typed_functor( &functor_type_info<ActualFunctor, StoredFunctor, Manager>::get_typed_functor ) {}
+        typed_functor (BF_FASTCALL * __restrict const get_typed_functor)( function_buffer_base const & ) noexcept;
+    };
+    template <>
+    struct reflector<false> { constexpr reflector( void const * ) noexcept {} };
+
+    template <bool safe>
+    struct empty_checker
+    {
+        constexpr empty_checker( bool const is_empty_handler ) noexcept : is_empty( is_empty_handler ) {}
+        bool is_empty_handler_vtable( void const * /*const p_current_vtable*/, void const * /*const p_empty_vtable*/ ) const noexcept { return is_empty; }
+        bool const is_empty;
+    };
+    template <>
+    struct empty_checker<false>
+    {
+        constexpr empty_checker( bool /*const is_empty_handler*/ ) noexcept {}
+        static bool is_empty_handler_vtable( void const * const p_current_vtable, void const * const p_empty_vtable ) noexcept
+        {
+            return p_current_vtable == p_empty_vtable;
+        }
+    };
+
+    /// \note See the above note for BOOST_AUX_NOEXCEPT_PTR.
+    ///                                       (14.10.2016.) (Domagoj Saric)
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) )
+    template <typename ReturnType, typename ... InvokerArguments>
+    struct invoker<true, ReturnType, InvokerArguments...>
+    {
+        template <typename Manager, typename StoredFunctor> constexpr invoker( Manager const *, StoredFunctor const * ) noexcept : invoke( &invoke_impl<Manager, StoredFunctor> ) {}
+        ReturnType (BF_FASTCALL * __restrict const invoke)( function_buffer_base & buffer, InvokerArguments... args ) noexcept;
+
+        template <typename FunctionObjManager, typename FunctionObj>
+		static ReturnType BF_FASTCALL invoke_impl( detail::function_buffer_base & buffer, InvokerArguments... args ) noexcept
+		{
+			auto & __restrict functionObject( *static_cast<FunctionObj *>( static_cast<void *>( FunctionObjManager::functor_ptr( buffer ) ) ) );
+			return functionObject( args... );
+		}
+    };
+    template <>
+    struct destroyer<support_level::nofail>
+    {
+        template <typename Manager> constexpr destroyer( Manager const * ) noexcept : destroy( &Manager::destroy ) {}
+        void (BF_FASTCALL * __restrict const destroy)( function_buffer_base &  __restrict buffer ) noexcept;
+    };
+    template <>
+    struct cloner<support_level::nofail>
+    {
+        template <typename Manager> constexpr cloner( Manager const * ) noexcept : clone( &Manager::clone ) {}
+        void (BF_FASTCALL * __restrict const clone)( function_buffer_base &  __restrict buffer ) noexcept;
+    };
+    template <>
+    struct mover<support_level::nofail>
+    {
+        template <typename Manager> constexpr mover( Manager const * ) noexcept : move( &Manager::move ) {}
+        void (BF_FASTCALL * __restrict const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept;
+    };
+#endif // MSVC workaround
+    #undef BOOST_AUX_NOEXCEPT_PTR
+
+    template <typename Invoker, typename Traits>
     // Implementation note:
-    //  The "generic typed/void-void invoker pointer is also stored here so
-    // that it can (more easily) be placed at the beginning of the vtable so
-    // that a vtable pointer would actually point directly to it (thus
-    // avoiding pointer offset calculation on invocation).
-    //  This also gives a unique/non-template vtable that can be held by
-    // function_base entirely but it also opens a window for erroneous vtable
-    // copying/assignment between different boost::function<> instantiations.
-    // A typed wrapper should therefor be added to the boost::function<>
-    // class to catch such errors at compile-time.
-    //                                      (xx.xx.2009.) (Domagoj Saric)
-    template <typename Buffer>
-    // Implementation note:
-    //   To test whether a boost::function<> instance is empty a simple check
-    // whether the current vtable pointer points to the vtable for the current
-    // empty handler vtable is not good enough for applications that use DLLs
+    //   To test whether a functionoid instance is empty a simple check whether
+    // the current vtable pointer points to the vtable for the current empty
+    // handler vtable is not good enough for applications that use DLLs
     // (or equivalents) and pass boost::function<> instances across shared
     // module boundaries. In such circumstances one can create an empty
     // boost::function<> instance in module A, where it will get initialised
@@ -596,111 +689,56 @@ v
     // which need not be the case.
     //                                      (01.11.2010.) (Domagoj Saric)
     struct vtable
+        :
+        Invoker,
+        destroyer    <Traits::destructor          >,
+        mover        <Traits::moveable            >,
+        cloner       <Traits::copyable            >,
+        reflector    <Traits::rtti                >,
+        empty_checker<Traits::dll_safe_empty_check>
     {
-		using this_call_invoker_placeholder_type = void (Buffer::*)();
-		using free_call_invoker_placeholder_type = void (        *)();
-		using invoker_placeholder_type = typename std::conditional
-		<
-			thiscall_optimization_available::value,
-			this_call_invoker_placeholder_type,
-			free_call_invoker_placeholder_type
-		>::type;
+        template <typename ActualFunctor, typename StoredFunctor, typename Manager>
+        constexpr vtable( Manager const * const manager_type, ActualFunctor const * const actual_functor_type, StoredFunctor const * const stored_functor_type, bool const is_empty_handler ) noexcept
+            :
+            Invoker                                    ( manager_type, stored_functor_type ),
+            destroyer    <Traits::destructor          >( manager_type ),
+            mover        <Traits::moveable            >( manager_type ),
+            cloner       <Traits::copyable            >( manager_type ),
+            reflector    <Traits::rtti                >( static_cast<std::tuple<Manager, ActualFunctor, StoredFunctor> const *>( nullptr ) ),
+		    empty_checker<Traits::dll_safe_empty_check>( is_empty_handler )
+        {}
 
-		template<typename TargetInvokerType>
-		TargetInvokerType const & invoker() const { return reinterpret_cast<TargetInvokerType const &>( void_invoker ); }
+        bool is_empty_handler_vtable( void const * const p_empty_handler_vtable ) const noexcept { return empty_checker<Traits::dll_safe_empty_check>::is_empty_handler_vtable( this, p_empty_handler_vtable ); }
 
-        //void BF_NOALIAS        clone  ( function_buffer const & in_buffer, function_buffer & out_buffer ) const { do_clone( in_buffer, out_buffer ); }
-        //void BF_NOALIAS        move   ( function_buffer       & in_buffer, function_buffer & out_buffer ) const { do_move ( in_buffer, out_buffer ); }
-        //void BF_NOTHROWNOALIAS destroy( function_buffer       & buffer                                  ) const { do_destroy( buffer );              }
-
-		invoker_placeholder_type const void_invoker;
-
-		void (BF_FASTCALL * const clone  )( Buffer const &  __restrict in_buffer, Buffer & __restrict out_buffer )         ;
-		void (BF_FASTCALL &       move   )( Buffer       && __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept;
-            //typed_functor ( BF_FASTCALL &  get_typed_functor )( function_buffer const & ) noexcept;
-		void (BF_FASTCALL &       destroy)( Buffer       &  __restrict buffer                                    ) noexcept;
-
-		bool const is_empty_handler_vtable;
+        // Implementation note:
+        //  The "generic typed/void() invoker pointer is also stored here so
+        // that it can (more easily) be placed at the beginning of the vtable so
+        // that a vtable pointer would actually point directly to it (thus
+        // avoiding pointer offset calculation on invocation).
+        //  This also gives a unique/non-template vtable that can be held by
+        // function_base entirely but it also opens a window for erroneous vtable
+        // copying/assignment between different boost::function<> instantiations.
+        // A typed wrapper should therefor be added to the boost::function<>
+        // class to catch such errors at compile-time.
+        //                                      (xx.xx.2009.) (Domagoj Saric)
+        using base_vtable = vtable<invoker<true, void>, Traits>;
+        operator base_vtable const & () const noexcept { return reinterpret_cast<base_vtable const &>( *this ); }
     }; // struct vtable
 
-    //template <support_level Level>
-    //void (BF_FASTCALL & clone)( Buffer const &  __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept( Level >= support_level::nofail );
-
-    template <support_level Level, typename Buffer>
-    struct cloner
-    {
-        void (BF_FASTCALL & clone)( Buffer const &  __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept( Level >= support_level::nofail );
-    };
-    template <typename Buffer>
-    struct cloner<support_level::trivial, Buffer>
-    {
-        static void BF_FASTCALL clone( Buffer const &  __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept { out_buffer = in_buffer; }
-    };
-
-    template <support_level Level, typename Buffer>
-    struct mover
-    {
-        void (BF_FASTCALL & move)( Buffer && __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept( Level >= support_level::nofail );
-    };
-    template <typename Buffer>
-    struct mover<support_level::trivial, Buffer>
-    {
-        static void BF_FASTCALL move( Buffer && __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept { cloner<support_level::trivial, Buffer>::clone( in_buffer, out_buffer ); }
-    };
-
-    template <support_level Level, typename Buffer>
-    struct destroyer
-    {
-        void ( BF_FASTCALL & destroy)( Buffer &  __restrict buffer ) noexcept( Level >= support_level::nofail );
-    };
-    template <typename Buffer>
-    struct destroyer<support_level::trivial, Buffer>
-    {
-        static void BF_FASTCALL destroy( Buffer & __restrict buffer ) noexcept { debug_clear( buffer ); }
-    };
-
-    template <class Invoker, class Manager, class IsEmptyHandler, typename Buffer, typename Copyable>
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) )
+    template <class Invoker, class Manager, class ActualFunctor, class StoredFunctor, class IsEmptyHandler, typename Traits>
     struct vtable_holder
     {
-		using vtable = vtable<Buffer>;
-
-        static typename vtable::this_call_invoker_placeholder_type get_invoker_pointer( std::true_type /*this call*/ )
-        {
-            return reinterpret_cast<vtable::this_call_invoker_placeholder_type>( &Invoker::bound_invoke );
-        }
-
-        static typename vtable::free_call_invoker_placeholder_type get_invoker_pointer( std::false_type /*free call*/ )
-        {
-            return reinterpret_cast<vtable::free_call_invoker_placeholder_type>( &Invoker::free_invoke );
-        }
-
-        static constexpr auto invoker( support_level_t<support_level::nofail> ) { return &Manager::clone; }
-		static constexpr auto invoker( std::false_type ) { return nullptr; }
-
-        static constexpr auto clone( support_level_t<support_level::na       > ) { return struct {}; }
-        static constexpr auto clone( support_level_t<support_level::supported> ) { return Manager::clone; }
-        static constexpr auto clone( support_level_t<support_level::nofail   > ) { return Manager::clone_noexcept; }
-        static constexpr auto clone( support_level_t<support_level::trivial  > ) { return nullptr; }
-
-        //std::tuple<invoker, copier, mover, destructor, rtti, empty_flag> vtable;
-
-        static vtable const stored_vtable;
+        static constexpr Invoker       const * invoker_type        = nullptr;
+        static constexpr Manager       const * manager_type        = nullptr;
+        static constexpr ActualFunctor const * actual_functor_type = nullptr;
+        static constexpr StoredFunctor const * stored_functor_type = nullptr;
+        static constexpr vtable<Invoker, Traits> const stored_vtable { manager_type, actual_functor_type, stored_functor_type, IsEmptyHandler::value };
     };
 
-    // Note: it is extremely important that this initialization uses
-    // static initialization. Otherwise, we will have a race
-    // condition here in multi-threaded code. See
-    // http://thread.gmane.org/gmane.comp.lib.boost.devel/164902.
-	template <class Invoker, class Manager, class IsEmptyHandler, typename Buffer, typename Copyable>
-    vtable<Buffer> const vtable_holder<Invoker, Manager, IsEmptyHandler, Buffer, Copyable>::stored_vtable =
-    {
-        get_invoker_pointer( thiscall_optimization_available() ),
-        clone_ptr( Copyable() ),
-        Manager::move,
-        Manager::destroy,
-		Manager::get_typed_functor,
-		IsEmptyHandler::value
-    };
+	//template <class Invoker, class Manager, class ActualFunctor, class IsEmptyHandler, typename Traits>
+    //constexpr vtable<Invoker, Traits> const vtable_holder<Invoker, Manager, ActualFunctor, IsEmptyHandler, Traits>::stored_vtable( static_cast<Manager const *>( nullptr ), static_cast<ActualFunctor const *>( nullptr ), IsEmptyHandler::value );
+#endif // MSVC workaround
 
     template <typename T>
     T get_default_value( std::false_type /*not a reference type*/ ) { return {}; }
@@ -711,15 +749,39 @@ v
     template <typename T>
     T get_default_value( std::true_type /*a reference type*/ )
     {
-        typedef typename std::remove_reference<T>::type actual_type_t;
+        using actual_type_t = typename std::remove_reference<T>::type;
         static T invalid_reference( *static_cast<actual_type_t *>( 0 ) );
         return invalid_reference;
     }
 
-	///////////////////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////////////////////
+
+    struct callable_tag {};
+
 	template <typename Traits>
-	class function_base
+	class function_base : public callable_tag
 	{
+    public:
+        /// Retrieve the type of the stored function object.
+        core::typeinfo const & target_type() const
+        {
+            return get_vtable().get_typed_functor( this->functor_ ).functor_type_info();
+        }
+
+        template <typename Functor> Functor       * target()       noexcept { return get_vtable().get_typed_functor( this->functor_ ). template target<Functor>(); }
+        template <typename Functor> Functor const * target() const noexcept { return const_cast<function_base &>( *this ).target<Functor const>(); }
+
+        template <typename F>
+        bool contains( F & f ) const noexcept
+        {
+            auto const p_f( target<F>() );
+            return p_f && function_equal( *p_f, f );
+        }
+
+    protected:
+        using buffer = function_buffer<Traits::sbo_size, Traits::sbo_alignment>;
+		using vtable = vtable<invoker<true, void>, Traits>;
+
 	private: // Private helper guard classes.
 		// ...(definition) to be moved out of body
 
@@ -731,13 +793,13 @@ v
 		public:
 			cleaner( function_base & function, vtable const & empty_handler_vtable )
 				:
-				pFunction_           ( &function            ),
+				p_function_          ( &function            ),
 				empty_handler_vtable_( empty_handler_vtable )
 			{}
 			cleaner(cleaner const &) = delete;
-			~cleaner() { conditional_clear( pFunction_ != 0 ); }
+			~cleaner() { conditional_clear( p_function_ != 0 ); }
 
-			void cancel() { BOOST_ASSERT( pFunction_ ); pFunction_ = 0; }
+			void cancel() { BOOST_ASSERT( p_function_ ); p_function_ = 0; }
 
 		private:
 			void conditional_clear( bool const clear )
@@ -745,29 +807,26 @@ v
 				using namespace detail;
 				if ( BOOST_UNLIKELY( clear ) )
 				{
-					BOOST_ASSERT( pFunction_ );
-					using empty_handler_traits  =          functor_traits     <EmptyHandler                          , Buffer>;
-					using empty_handler_manager = typename get_functor_manager<EmptyHandler, fallocator<EmptyHandler>, Buffer>::type;
+					BOOST_ASSERT( p_function_ );
+					using empty_handler_traits  = functor_traits <EmptyHandler                              , buffer>;
+					using empty_handler_manager = functor_manager<EmptyHandler, std::allocator<EmptyHandler>, buffer>;
 					//...zzz..remove completely or replace with a simple is_stateless<>?
 					static_assert
 					(
 						empty_handler_traits::allowsPODOptimization &&
 						empty_handler_traits::allowsSmallObjectOptimization, ""
 					);
-					empty_handler_manager::assign( EmptyHandler(), pFunction_->functor_, fallocator<EmptyHandler>() );
-					pFunction_->p_vtable_ = &empty_handler_vtable_;
+					empty_handler_manager::assign( EmptyHandler(), p_function_->functor_, std::allocator<EmptyHandler>() );
+					p_function_->p_vtable_ = &empty_handler_vtable_;
 				}
 			}
 
 		private:
-			function_base       * pFunction_;
+			function_base       * p_function_;
 			vtable        const & empty_handler_vtable_;
 		}; // class cleaner
 
 	protected:
-		using Buffer = function_buffer<Traits::SboSize, Traits::Alignment>;
-		using vtable = vtable<Buffer>;
-
 		function_base() { debug_clear( *this ); }
 		function_base( function_base const & other, vtable const & empty_handler_vtable )
 		{
@@ -797,15 +856,12 @@ v
 		template <class EmptyHandler>
 		void swap( function_base & other, vtable const & empty_handler_vtable );
 
-	public:
-		/// Determine if the function is empty (i.e. has an empty target).
-		bool empty() const { return get_vtable().is_empty_handler_vtable; }
-
-
 	protected:
-		vtable const & get_vtable() const { BF_ASSUME( p_vtable_ ); return *p_vtable_; }
+        bool empty( void const * const p_empty_handler_vtable ) const noexcept { return get_vtable().is_empty_handler_vtable( p_empty_handler_vtable ); }
 
-		Buffer & functor() const { return functor_; }
+		vtable const & get_vtable() const noexcept { BF_ASSUME( p_vtable_ ); return *p_vtable_; }
+
+		buffer & functor() const noexcept { return functor_; }
 
 		template <bool direct, class EmptyHandler>
 		void clear( vtable const & empty_handler_vtable ) noexcept
@@ -819,7 +875,7 @@ v
 				emptyHandler,
 				empty_handler_vtable,
 				empty_handler_vtable, 
-				fallocator<EmptyHandler>(),
+				std::allocator<EmptyHandler>(),
 				std::false_type()
 			);
 		}
@@ -836,7 +892,7 @@ v
 		)
 		{
 			BOOST_ASSERT( &functor_vtable == f.p_vtable_ );
-			boost::ignore_unused( functor_vtable );
+			ignore_unused( functor_vtable );
 			if ( direct )
 			{
 				BOOST_ASSERT( &static_cast<function_base const &>( f ) != this );
@@ -870,7 +926,7 @@ v
 			std::true_type /*can use direct assign*/
 		) noexcept
 		{
-			using functor_manager = typename get_functor_manager<F, Allocator, Buffer>::type;
+			using functor_manager = functor_manager<F, Allocator, buffer>;
 			this->destroy();
 			functor_manager::assign(std::forward<F>(f), this->functor_, a);
 			this->p_vtable_ = &functor_vtable;
@@ -889,17 +945,16 @@ v
 			// This most generic case needs to be reworked [currently does redundant
 			// copying (through the vtable function pointers) and does not use all
 			// the type information it could...]...
-			using functor_manager = typename get_functor_manager<F, Allocator, Buffer>::type;
-			function_base tmp(empty_handler_vtable, EmptyHandler());
-			functor_manager::assign(std::forward<F>(f), tmp.functor_, a);
+			using functor_manager = functor_manager<F, Allocator, buffer>;
+			function_base tmp( empty_handler_vtable, EmptyHandler() );
+			functor_manager::assign( std::forward<F>( f ), tmp.functor_, a );
 			tmp.p_vtable_ = &functor_vtable;
-			this->swap<EmptyHandler>(tmp, empty_handler_vtable);
+			this->swap<EmptyHandler>( tmp, empty_handler_vtable );
 		}
 
 	private: // Assignment from another functionoid helpers.
 		void assign_functionoid_direct( function_base const & source, vtable const & /*empty_handler_vtable*/ ) noexcept
 		{
-			BOOST_ASSERT_MSG( source.get_vtable().clone != nullptr, "Should not get here: functionoid instance not copyable!" );
 			source.get_vtable().clone( source.functor_, this->functor_ );
 			p_vtable_ = &source.get_vtable();
 		}
@@ -927,83 +982,8 @@ v
 		template <class EmptyHandler> class safe_mover;
 
 				vtable const * p_vtable_;
-		mutable Buffer         functor_ ;
+		mutable buffer         functor_ ;
 	}; // class function_base
-
-	template <typename Traits>
-	class function_base<Traits>::safe_mover_base
-	{
-	protected:
-		using functor = typename function_base<Traits>::Buffer;
-		using vtable = typename function_base<Traits>::vtable;
-
-	protected:
-		safe_mover_base(safe_mover_base const&) = delete;
-		~safe_mover_base() = default;
-
-	public:
-		safe_mover_base( function_base & functionToGuard, function_base & emptyFunctionToMoveTo )
-			:
-			pFunctionToRestoreTo  ( &functionToGuard                   ),
-			emptyFunctionToMoveTo_( emptyFunctionToMoveTo              ),
-			empty_handler_vtable_ ( emptyFunctionToMoveTo.get_vtable() )
-		{
-			BOOST_ASSERT( emptyFunctionToMoveTo.p_vtable_ == &empty_handler_vtable_ );
-			move( functionToGuard, emptyFunctionToMoveTo, empty_handler_vtable_ );
-		}
-
-	public:
-		void cancel() { BOOST_ASSERT( pFunctionToRestoreTo ); pFunctionToRestoreTo = 0; }
-
-		static void move( function_base & source, function_base & destination, vtable const & empty_handler_vtable )
-		{
-			source.get_vtable().move( std::move( source.functor_ ), destination.functor_ );
-			destination.p_vtable_ = source.p_vtable_;
-			source     .p_vtable_ = &empty_handler_vtable;
-		}
-
-	protected:
-		function_base * __restrict pFunctionToRestoreTo  ;
-		function_base & __restrict emptyFunctionToMoveTo_;
-		vtable const  & __restrict empty_handler_vtable_ ;
-	}; // safe_mover_base
-
-	// ...if the is_stateless<EmptyHandler> requirement sticks this will not need
-	// to be a template...
-	template <class Traits>
-	template <class EmptyHandler>
-	class function_base<Traits>::safe_mover : public safe_mover_base
-	{
-	public:
-		using safe_mover_base::safe_mover_base;
-		~safe_mover()
-		{
-			if ( pFunctionToRestoreTo )
-			{
-				cleaner<EmptyHandler> guard( *pFunctionToRestoreTo, empty_handler_vtable_ );
-				move( emptyFunctionToMoveTo_, *pFunctionToRestoreTo, empty_handler_vtable_ );
-				guard.cancel();
-			}
-		}
-	}; // class safe_mover
-
-	template <class Traits>
-	template <class EmptyHandler>
-	void function_base<Traits>::swap( function_base & other, vtable const & empty_handler_vtable )
-	{
-		if ( &other == this )
-			return;
-
-		function_base tmp( empty_handler_vtable, EmptyHandler() );
-
-		safe_mover<EmptyHandler> my_restorer   ( *this, tmp   );
-		safe_mover<EmptyHandler> other_restorer( other, *this );
-
-		safe_mover_base::move( tmp, other, empty_handler_vtable );
-
-		my_restorer   .cancel();
-		other_restorer.cancel();
-	}
 
 	template <typename T>
     BOOST_FORCEINLINE bool has_empty_target( T * const funcPtr, function_ptr_tag ) { return funcPtr == 0; }
@@ -1026,13 +1006,95 @@ v
     BOOST_FORCEINLINE bool has_empty_target( std::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag )
     {
         // Implementation note:
-        //   We save/assign a reference to a boost::function even if it is empty
-        // and let the referenced function handle a possible empty invocation.
+        // We save/assign a reference to a boost::function even if it is
+        // empty and let the referenced function handle a possible empty
+        // invocation.
         //                                    (28.10.2010.) (Domagoj Saric)
-        return std::is_base_of<function_base, FunctionObj>::value
+        return std::is_base_of<callable_tag, FunctionObj>::value
             ? false
             : has_empty_target( f.get(), function_obj_tag() );
     }
+
+    template <class FunctionObj>
+    BOOST_FORCEINLINE bool has_empty_target( boost::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag )
+    {
+        return has_empty_target( std::cref( f.get() ), function_obj_ref_tag() );
+    }
+
+	template <typename Traits>
+	class function_base<Traits>::safe_mover_base
+	{
+	protected:
+		using functor = typename function_base<Traits>::buffer;
+		using vtable  = typename function_base<Traits>::vtable;
+
+	protected:
+		safe_mover_base(safe_mover_base const&) = delete;
+		~safe_mover_base() = default;
+
+	public:
+		safe_mover_base( function_base & functionToGuard, function_base & empty_function_to_move_to )
+			:
+			p_function_to_restore_to_ ( &functionToGuard                       ),
+			empty_function_to_move_to_( empty_function_to_move_to              ),
+			empty_handler_vtable_     ( empty_function_to_move_to.get_vtable() )
+		{
+			BOOST_ASSERT( empty_function_to_move_to_.p_vtable_ == &empty_handler_vtable_ );
+			move( functionToGuard, empty_function_to_move_to_, empty_handler_vtable_ );
+		}
+
+	public:
+		void cancel() { BOOST_ASSERT( p_function_to_restore_to_ ); p_function_to_restore_to_ = 0; }
+
+		static void move( function_base & source, function_base & destination, vtable const & empty_handler_vtable )
+		{
+			source.get_vtable().move( std::move( source.functor_ ), destination.functor_ );
+			destination.p_vtable_ = source.p_vtable_;
+			source     .p_vtable_ = &empty_handler_vtable;
+		}
+
+	protected:
+		function_base * __restrict p_function_to_restore_to_ ;
+		function_base & __restrict empty_function_to_move_to_;
+		vtable const  & __restrict empty_handler_vtable_     ;
+	}; // safe_mover_base
+
+	// ...if the is_stateless<EmptyHandler> requirement sticks this will not need
+	// to be a template...
+	template <class Traits>
+	template <class EmptyHandler>
+	class function_base<Traits>::safe_mover : public safe_mover_base
+	{
+	public:
+		using safe_mover_base::safe_mover_base;
+		~safe_mover()
+		{
+			if ( this->p_function_to_restore_to_ )
+			{
+				cleaner<EmptyHandler> guard( *this->p_function_to_restore_to_, this->empty_handler_vtable_ );
+				move( this->empty_function_to_move_to_, *this->p_function_to_restore_to_, this->empty_handler_vtable_ );
+				guard.cancel();
+			}
+		}
+	}; // class safe_mover
+
+	template <class Traits>
+	template <class EmptyHandler>
+	void function_base<Traits>::swap( function_base & other, vtable const & empty_handler_vtable )
+	{
+		if ( &other == this )
+			return;
+
+		function_base tmp( empty_handler_vtable, EmptyHandler() );
+
+		safe_mover<EmptyHandler> my_restorer   ( *this, tmp   );
+		safe_mover<EmptyHandler> other_restorer( other, *this );
+
+		safe_mover_base::move( tmp, other, empty_handler_vtable );
+
+		my_restorer   .cancel();
+		other_restorer.cancel();
+	}
 
 	template <typename Traits>
 	template <bool direct, typename EmptyHandler, typename F, typename Allocator>
@@ -1059,7 +1121,7 @@ v
             // here.
             //                                    (02.11.2010.) (Domagoj Saric)
 			BOOST_ASSERT( this->p_vtable_ == nullptr );
-			using functor_manager = typename get_functor_manager<F, Allocator, Buffer>::type;
+			using functor_manager = functor_manager<F, Allocator, buffer>;
 			functor_manager::assign( std::forward<F>( f ), this->functor_, a );
 			this->p_vtable_ = &functor_vtable;
 		}
@@ -1070,9 +1132,10 @@ v
 			/// allocated targets can be assigned directly because they have a
 			/// nothrow swap operation.
 	        ///                                   (28.10.2010.) (Domagoj Saric)
-			using has_no_fail_assignement_t = std::bool_constant
-			<
-				functor_traits<F, Buffer>::allowsSmallObjectOptimization &&
+			using has_no_fail_assignement_t = std::integral_constant
+            <
+                bool,
+				functor_traits<F, buffer>::allowsSmallObjectOptimization &&
 				(
 					std::is_nothrow_copy_constructible<F>::value ||
 					std::is_trivially_copy_constructible<F>::value
@@ -1098,65 +1161,34 @@ class callable<ReturnType(Arguments ...), Traits>
 	: public detail::function_base<Traits>
 {
 private:
-	using Buffer = typename detail::function_base<Traits>::Buffer;
-
-	template <typename FunctionObj, typename FunctionObjManager>
-	struct function_obj_invoker : detail::function_buffer_holder<Traits::SboSize, Traits::Alignment>
-	{
-		//   The buffer argument comes last so that the stack layout in the
-		// invoker would be as similar as possible to the one expected by the
-		// target (with the assumption of a cdecl-like right-to-left argument
-		// order).
-		static ReturnType free_invoke( Arguments... args, detail::function_buffer_base & buffer )
-		{
-			// We provide the invoker with a manager with a minimum amount of
-			// type information (because it already knows the stored function
-			// object it works with, it only needs to get its address from a
-			// function_buffer object). Because of this we must cast the pointer
-			// returned by FunctionObjManager::functor_ptr() because it can be
-			// a plain void * in case of the trivial managers. In case of the
-			// trivial ptr manager it is even a void * * so a double static_cast
-			// (or a reinterpret_cast) is necessary.
-			auto & __restrict functionObject
-			(
-				*static_cast<FunctionObj *>
-				(
-					static_cast<void *>
-					(
-						FunctionObjManager::functor_ptr( buffer )
-					)
-				)
-			);
-			return functionObject( args... );
-		}
-
-		BOOST_FORCEINLINE ReturnType bound_invoke( Arguments... args ) { return free_invoke( args..., buffer ); }
-	};
+    using function_base = detail::function_base<Traits>;
+	using buffer        = typename function_base::buffer;
 
 public: // Public typedefs/introspection section.
 	using result_type = ReturnType;
 
     using signature_type = result_type ( Arguments... );
 
-	using empty_handler = typename Traits::EmptyHandler;
+	using empty_handler = typename Traits::empty_handler;
 
 	static constexpr std::uint8_t arity = sizeof...( Arguments );
 
 private: // Private implementation types.
-    //  We need a specific thin wrapper around the base empty handler that will
+    // We need a specific thin wrapper around the base empty handler that will
     // just consume all the parameters. This way the base empty handler can have
     // one plain simple operator(). As part of anti-code-bloat measures,
     // my_empty_handler is used only when really necessary (with the invoker),
     // otherwise the base_empty_handler type is used.
     struct my_empty_handler : empty_handler
     {
-        result_type operator()( Arguments... ) const
+        result_type operator()( Arguments... ) const noexcept( noexcept( empty_handler:: template handle_empty_invoke<result_type>() ) )
         {
             return empty_handler:: template handle_empty_invoke<result_type>();
         }
     };
 
-    using vtable_type = typename detail::function_base<Traits>::vtable;
+    using base_vtable = typename detail::function_base<Traits>::vtable;
+    using vtable_type = detail::vtable<detail::invoker<Traits::is_noexcept, ReturnType, Arguments...>, Traits>;
 
 public: // Public function interface.
 
@@ -1174,18 +1206,18 @@ public: // Public function interface.
         : function_base( no_eh_state_construction_trick( plain_function_pointer ) ) {}
 
     callable( callable const & f )
-        : function_base( static_cast<function_base const &>( f ), empty_handler_vtable() ) { static_assert( Traits::CopyConstructible, "This callable instantiation is not copyable." ); }
+        : function_base( static_cast<function_base const &>( f ), empty_handler_vtable() ) { static_assert( Traits::copyable > support_level::na, "This callable instantiation is not copyable." ); }
 
 	callable( callable && f ) noexcept
 		: function_base( static_cast<function_base&&>( f ), empty_handler_vtable() ) {}
 
-	result_type operator()(Arguments...args) const
+	result_type BF_FASTCALL operator()( Arguments... args ) const noexcept( Traits::is_noexcept )
 	{
-		return do_invoke(args ..., detail::thiscall_optimization_available());
+        return vtable().invoke( this->functor(), args... );
 	}
 
     /// Clear out a target (replace it with an empty handler), if there is one.
-    void clear() { function_base::clear<false, empty_handler>( empty_handler_vtable() ); }
+    void clear() { function_base:: template clear<false, empty_handler>( empty_handler_vtable() ); }
 
     template <typename F>
     void assign( F && f                    ) { this->do_assign<false>( std::forward<F>( f )    ); }
@@ -1193,34 +1225,27 @@ public: // Public function interface.
     template <typename F, typename Allocator>
     void assign( F && f, Allocator const a ) { this->do_assign<false>( std::forward<F>( f ), a ); }
 
-    callable & operator=( callable const & f ) { { static_assert( Traits::CopyConstructible, "This callable instantiation is not copyable." ); } this->assign( f ); return *this; }
+    callable & operator=( callable const & f ) { { static_assert( Traits::copyable, "This callable instantiation is not copyable." ); } this->assign( f ); return *this; }
 	callable & operator=( callable && f ) noexcept { this->assign( std::move( f ) ); return *this; }
     callable & operator=( signature_type * const plain_function_pointer ) noexcept { this->assign( plain_function_pointer ); return *this; }
+    template <typename F>
+    callable & operator=( F && f ) noexcept { this->assign( std::forward<F>( f ) ); return *this; }
 
     void swap( callable & other ) noexcept
     {
         static_assert( sizeof( callable ) == sizeof( function_base ), "" );
-        return function_base::swap<empty_handler>( other, empty_handler_vtable() );
+        return function_base:: template swap<empty_handler>( other, empty_handler_vtable() );
     }
+
+    /// Determine if the function is empty (i.e. has an empty target).
+    bool empty() const noexcept { return function_base::empty( &empty_handler_vtable() ); }
 
     explicit operator bool() const noexcept { return !this->empty(); }
 
 private:
-    static vtable_type const & empty_handler_vtable() { return vtable_for_functor<detail::fallocator<empty_handler>, empty_handler>( my_empty_handler() ); }
+    static auto const & empty_handler_vtable() noexcept { return vtable_for_functor<std::allocator<empty_handler>, empty_handler>( my_empty_handler() ); }
 
-    BOOST_FORCEINLINE
-    result_type do_invoke( Arguments... args, std::true_type /*this call*/ ) const
-    {
-        using invoker_type = result_type (Buffer::*)(Arguments...);
-        return (functor().*(get_vtable(). template invoker<invoker_type>()))(args...);
-    }
-
-    BOOST_FORCEINLINE
-    result_type do_invoke( Arguments... args, std::false_type /*free call*/ ) const
-    {
-        using invoker_type = result_type (*)(Arguments..., Buffer &);
-        return get_vtable(). template invoker<invoker_type>()( args..., functor() );
-    }
+    auto const & vtable() const noexcept { return reinterpret_cast<vtable_type const &>( function_base::get_vtable() ); }
 
     //  This overload should not actually be for a 'complete' callable as it is enough
 	// for the signature template parameter to be the same (and therefor the vtable is the same, with
@@ -1229,46 +1254,62 @@ private:
     template <typename Allocator, typename ActualFunctor>
     static vtable_type const & vtable_for_functor_aux( std::true_type /*is a callable*/, callable const & functor )
     {
-      static_assert( std::is_base_of<callable, typename std::remove_reference<ActualFunctor>::type>::value, "" );
-      return functor.get_vtable();
+        static_assert( std::is_base_of<callable, typename std::remove_reference<ActualFunctor>::type>::value, "" );
+        return functor.get_vtable();
     }
 
     template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
     static vtable_type const & vtable_for_functor_aux( std::false_type /*is not a callable*/, StoredFunctor const & /*functor*/ )
     {
-      using namespace detail;
+        using namespace detail;
 
-      // A minimally typed manager is used for the invoker (anti-code-bloat).
-      using invoker_manager_type = typename get_functor_manager<StoredFunctor, Allocator, Buffer>::type;
-
-      // For the empty handler we use the manager for the base_empty_handler not
-      // my_empty_handler (anti-code-bloat) because they only differ in the
-      // operator() member function which is irrelevant for/not used by the
-      // manager.
-      using manager_type = typename get_functor_manager // get_typed_functor_manager
-              <
+        // For the empty handler we use the manager for the base_empty_handler not
+        // my_empty_handler (anti-code-bloat) because they only differ in the
+        // operator() member function which is irrelevant for/not used by the
+        // manager.
+        using is_empty_handler = std::is_same<ActualFunctor, empty_handler>;
+        using manager_type = functor_manager
+        <
+            typename std::conditional
+            <
+                is_empty_handler::value,
                 ActualFunctor,
-                typename std::conditional
-                <
-                  std::is_same<ActualFunctor, empty_handler>::value,
-                  ActualFunctor,
-                  StoredFunctor
-                >::type,
-                Allocator,
-				Buffer
-              >::type;
+                StoredFunctor
+            >::type,
+            Allocator,
+            buffer
+        >;
 
-	  using invoker_type = function_obj_invoker<StoredFunctor, invoker_manager_type>;
+        // A minimally typed manager is used for the invoker (anti-code-bloat).
+        using invoker_manager_type = functor_manager<StoredFunctor, Allocator, buffer>;
 
-      static_assert
-      (
-        std::is_same<ActualFunctor, empty_handler>::value
-            ==
-        std::is_same<StoredFunctor, my_empty_handler  >::value, ""
-      );
-      using is_empty_handler = std::is_same<ActualFunctor, empty_handler>;
-	  using is_copyable = std::bool_constant<Traits::CopyConstructible>;
-      return vtable_holder<invoker_type, manager_type, is_empty_handler, Buffer, is_copyable>::stored_vtable;
+        static_assert
+        (
+            std::is_same<ActualFunctor, empty_handler>::value
+                ==
+            std::is_same<StoredFunctor, my_empty_handler>::value, ""
+        );
+
+        using invoker_type = invoker<Traits::is_noexcept, ReturnType, Arguments...>;
+
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) )
+        return vtable_holder<invoker_type, manager_type, ActualFunctor, StoredFunctor, is_empty_handler, Traits>::stored_vtable;
+#else
+        // http://stackoverflow.com/questions/24398102/constexpr-and-initialization-of-a-static-const-void-pointer-with-reinterpret-cas
+        // 
+        // Note: it is extremely important that this initialization uses
+        // static initialization. Otherwise, we will have a race
+        // condition here in multi-threaded code. See
+        // http://thread.gmane.org/gmane.comp.lib.boost.devel/164902.
+        static constexpr detail::vtable<invoker_type, Traits> const the_vtable
+        (
+            static_cast<manager_type  const *>( nullptr ),
+            static_cast<ActualFunctor const *>( nullptr ),
+            static_cast<StoredFunctor const *>( nullptr ),
+            is_empty_handler::value
+        );
+        return the_vtable;
+#endif
     } // vtable_for_functor_aux()
 
     template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
@@ -1276,9 +1317,9 @@ private:
     {
         return vtable_for_functor_aux<Allocator, ActualFunctor>
         (
-            std::is_base_of<callable, StoredFunctor>(),
+            std::is_base_of<function_base, StoredFunctor>(),
             functor
-        );        
+        );
     }
 
     // ...direct actually means whether to skip pre-destruction (when not
@@ -1292,7 +1333,16 @@ private:
     }
 
     template <bool direct, typename F>
-    void do_assign( F && f ) { do_assign<direct>( std::forward<F>( f ), Traits:: template Allocator<F>() ); }
+    void do_assign( F && f )
+    {
+        using functor_type = typename std::remove_reference<F>::type;
+    #ifdef __clang__ // Xcode8 Apple Clang dubious compiler error workaround.
+        struct allocator : Traits:: template allocator<functor_type> { using Traits:: template allocator<functor_type>::allocator; };
+    #else
+        using allocator = Traits:: template allocator<functor_type>;
+    #endif // __clang__
+        do_assign<direct>( std::forward<F>( f ), allocator() );
+    }
 
     template <bool direct, typename F, typename Allocator>
     void dispatch_assign( F && f, Allocator const a, detail::function_obj_tag ) { do_assign<direct>( std::forward<F>( f ), std::forward<F>( f ), a ); }
@@ -1319,7 +1369,7 @@ private:
     {
 		using NakedStoredFunctor = typename std::remove_const<typename std::remove_reference<StoredFunctor>::type>::type;
         using StoredFunctorAllocator = typename ActualFunctorAllocator:: template rebind<NakedStoredFunctor>::other;
-        function_base::assign<direct, empty_handler>
+        function_base:: template assign<direct, empty_handler>
         (
             std::forward<StoredFunctor>( stored_functor ),
             vtable_for_functor<StoredFunctorAllocator, ActualFunctor>( stored_functor ),
@@ -1332,7 +1382,7 @@ private:
     template <typename FunctionObj, typename Allocator>
     vtable_type const & no_eh_state_construction_trick( FunctionObj && f, Allocator const a )
     {
-		static_assert( !Traits::CopyConstructible || std::is_copy_constructible<FunctionObj>::value, "This callable instantiation requires copyable function objects." );
+		static_assert( Traits::copyable != support_level::na || std::is_copy_constructible<FunctionObj>::value, "This callable instantiation requires copyable function objects." );
 
         detail::debug_clear( *this );
         do_assign<true>( std::forward<FunctionObj>( f ), a );
@@ -1343,7 +1393,7 @@ private:
     vtable_type const & no_eh_state_construction_trick( FunctionObj && f )
     {
 		using NakedFunctionObj = typename std::remove_const<typename std::remove_reference<FunctionObj>::type>::type;
-		return no_eh_state_construction_trick( std::forward<FunctionObj>( f ), Traits:: template Allocator<NakedFunctionObj>() );
+		return no_eh_state_construction_trick( std::forward<FunctionObj>( f ), Traits:: template allocator<NakedFunctionObj>() );
     }
 }; // class callable
 
