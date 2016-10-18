@@ -21,9 +21,7 @@
 #include <boost/core/typeinfo.hpp>
 #include <boost/config.hpp>
 #include <boost/function_equal.hpp>
-#include <boost/throw_exception.hpp>
 
-#include "detail/platform_specifics.hpp"
 #include "policies.hpp"
 #include "rtti.hpp"
 
@@ -193,8 +191,8 @@ namespace detail
     /// Manager for trivial objects that fit into sizeof( void * ).
     struct manager_ptr
     {
-        static auto functor_ptr( function_buffer_base       & buffer ) {                              return &buffer.obj_ptr; }
-        static auto functor_ptr( function_buffer_base const & buffer ) { BF_ASSUME( buffer.obj_ptr ); return &buffer.obj_ptr; }
+        static auto functor_ptr( function_buffer_base       & buffer ) {                                 return &buffer.obj_ptr; }
+        static auto functor_ptr( function_buffer_base const & buffer ) { BOOST_ASSUME( buffer.obj_ptr ); return &buffer.obj_ptr; }
 
         template <typename Functor, typename Allocator>
         static void assign( Functor const functor, function_buffer_base & out_buffer, Allocator ) noexcept
@@ -203,20 +201,20 @@ namespace detail
             new ( functor_ptr( out_buffer ) ) Functor( functor );
         }
 
-        static void BF_FASTCALL clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer ) noexcept
+        static void BOOST_CC_FASTCALL clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer ) noexcept
         {
 		    //...zzz...even with __assume MSVC still generates branching code...
             //assign( *functor_ptr( in_buffer ), out_buffer, dummy_allocator() );
             out_buffer.obj_ptr = in_buffer.obj_ptr;
         }
 
-        static void BF_FASTCALL move( function_buffer_base && in_buffer, function_buffer_base & out_buffer ) noexcept
+        static void BOOST_CC_FASTCALL move( function_buffer_base && in_buffer, function_buffer_base & out_buffer ) noexcept
         {
             clone( in_buffer, out_buffer );
             destroy( in_buffer );
         }
 
-        static void BF_FASTCALL destroy( function_buffer_base & buffer ) noexcept
+        static void BOOST_CC_FASTCALL destroy( function_buffer_base & buffer ) noexcept
         {
             debug_clear( *functor_ptr( buffer ) );
         }
@@ -239,18 +237,18 @@ namespace detail
             new ( functor_ptr( out_buffer ) ) Functor( functor );
         }
 
-        static void BF_FASTCALL clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
+        static void BOOST_CC_FASTCALL clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
         {
             assign( Buffer::from_base( in_buffer ), Buffer::from_base( out_buffer ), dummy_allocator() );
         }
 
-        static void BF_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
+        static void BOOST_CC_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
         {
             clone( in_buffer, out_buffer );
             destroy( in_buffer );
         }
 
-        static void BF_FASTCALL destroy( function_buffer_base & buffer ) noexcept
+        static void BOOST_CC_FASTCALL destroy( function_buffer_base & buffer ) noexcept
         {
             debug_clear( Buffer::from_base( buffer ) );
         }
@@ -265,7 +263,7 @@ namespace detail
         using trivial_allocator = typename Allocator:: template rebind<unsigned char>::other;
 
     public:
-        static void       * functor_ptr( function_buffer_base       & buffer ) { BF_ASSUME( buffer.trivial_heap_obj.ptr ); return buffer.trivial_heap_obj.ptr; }
+        static void       * functor_ptr( function_buffer_base       & buffer ) { BOOST_ASSUME( buffer.trivial_heap_obj.ptr ); return buffer.trivial_heap_obj.ptr; }
         static void const * functor_ptr( function_buffer_base const & buffer ) { return functor_ptr( const_cast<function_buffer_base &>( buffer ) ); }
 
         template <typename Functor>
@@ -286,7 +284,7 @@ namespace detail
             clone( in_buffer, out_buffer );
         }
 
-        static void BF_FASTCALL clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer )
+        static void BOOST_CC_FASTCALL clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer )
         {
             trivial_allocator a;
             auto const storage_size( in_buffer.trivial_heap_obj.size );
@@ -295,13 +293,13 @@ namespace detail
             std::memcpy( functor_ptr( out_buffer ), functor_ptr( in_buffer ), storage_size );
         }
 
-        static void BF_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
+        static void BOOST_CC_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
         {
             out_buffer.trivial_heap_obj = in_buffer.trivial_heap_obj;
             debug_clear( in_buffer.trivial_heap_obj );
         }
 
-        static void BF_FASTCALL destroy( function_buffer_base & buffer ) noexcept
+        static void BOOST_CC_FASTCALL destroy( function_buffer_base & buffer ) noexcept
         {
             BOOST_ASSERT( buffer.trivial_heap_obj.ptr  );
             BOOST_ASSERT( buffer.trivial_heap_obj.size );
@@ -327,20 +325,20 @@ namespace detail
             new ( functor_ptr( out_buffer ) ) Functor( std::forward<F>( functor ) );
         }
 
-        static void BF_FASTCALL clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer ) noexcept( std::is_nothrow_copy_constructible<Functor>::value )
+        static void BOOST_CC_FASTCALL clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer ) noexcept( std::is_nothrow_copy_constructible<Functor>::value )
         {
             Functor const & in_functor( *functor_ptr( in_buffer ) );
             assign( Buffer::from_base( in_functor ), Buffer::from_base( out_buffer ), dummy_allocator() );
         }
 
-        static void BF_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept( std::is_nothrow_move_constructible<Functor>::value )
+        static void BOOST_CC_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept( std::is_nothrow_move_constructible<Functor>::value )
         {
             auto & __restrict in_functor( *functor_ptr( in_buffer ) );
             assign( std::move( in_functor ), Buffer::from_base( out_buffer ), dummy_allocator() );
             destroy( in_buffer );
         }
 
-        static void BF_FASTCALL destroy( function_buffer_base & buffer ) noexcept ( std::is_nothrow_destructible<Functor>::value )
+        static void BOOST_CC_FASTCALL destroy( function_buffer_base & buffer ) noexcept ( std::is_nothrow_destructible<Functor>::value )
         {
             auto & __restrict functor( *functor_ptr( buffer ) );
             functor.~Functor();
@@ -393,18 +391,18 @@ namespace detail
             assign_aux<guard_t>( std::forward<F>( functor ), out_buffer, source_allocator );
         }
 
-        static void BF_FASTCALL clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer )
+        static void BOOST_CC_FASTCALL clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer )
         {
             functor_and_allocator_t const & in_functor_and_allocator( *functor_ptr( in_buffer ) );
             assign( in_functor_and_allocator.functor(), out_buffer, in_functor_and_allocator.allocator() );
         }
 
-        static void BF_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
+        static void BOOST_CC_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
         {
             manager_trivial_heap<OriginalAllocator>::move( std::move( in_buffer ), out_buffer );
         }
 
-        static void BF_FASTCALL destroy( function_buffer_base & buffer ) noexcept( std::is_nothrow_destructible<Functor>::value )
+        static void BOOST_CC_FASTCALL destroy( function_buffer_base & buffer ) noexcept( std::is_nothrow_destructible<Functor>::value )
         {
             functor_and_allocator_t & __restrict in_functor_and_allocator( *functor_ptr( buffer ) );
 
@@ -519,7 +517,7 @@ namespace detail
     struct invoker
     {
         template <typename Manager, typename StoredFunctor> constexpr invoker( Manager const *, StoredFunctor const * ) noexcept : invoke( &invoke_impl<Manager, StoredFunctor> ) {}
-        ReturnType (BF_FASTCALL * const invoke)( function_buffer_base & __restrict buffer, InvokerArguments... args ) BOOST_AUX_NOEXCEPT_PTR( is_noexcept );
+        ReturnType (BOOST_CC_FASTCALL * const invoke)( function_buffer_base & __restrict buffer, InvokerArguments... args ) BOOST_AUX_NOEXCEPT_PTR( is_noexcept );
 
         /// \note Defined here instead of within the callable template because
         /// of MSVC14 deficiencies with noexcept( expr ) function pointers (to
@@ -528,7 +526,7 @@ namespace detail
         template <typename FunctionObjManager, typename FunctionObj>
 		/// \note Argument order optimized for a pass-in-reg calling convention.
 		///                                   (17.10.2016.) (Domagoj Saric)
-		static ReturnType BF_FASTCALL invoke_impl( detail::function_buffer_base & buffer, InvokerArguments... args ) BOOST_AUX_NOEXCEPT_PTR( is_noexcept ) // MSVC14u3 and Xcode8 AppleClang barf @ ( noexcept( std::declval<FunctionObj>( args... ) ) )
+		static ReturnType BOOST_CC_FASTCALL invoke_impl( detail::function_buffer_base & buffer, InvokerArguments... args ) BOOST_AUX_NOEXCEPT_PTR( is_noexcept ) // MSVC14u3 and Xcode8 AppleClang barf @ ( noexcept( std::declval<FunctionObj>( args... ) ) )
 		{
 			// We provide the invoker with a manager with a minimum amount of
 			// type information (because it already knows the stored function
@@ -557,13 +555,13 @@ namespace detail
     struct destroyer
     {
         template <typename Manager> constexpr destroyer( Manager const * ) noexcept : destroy( &Manager::destroy ) {}
-        void (BF_FASTCALL * const destroy)( function_buffer_base & __restrict buffer ) BOOST_AUX_NOEXCEPT_PTR( Level >= support_level::nofail );
+        void (BOOST_CC_FASTCALL * const destroy)( function_buffer_base & __restrict buffer ) BOOST_AUX_NOEXCEPT_PTR( Level >= support_level::nofail );
     };
     template <>
     struct destroyer<support_level::trivial>
     {
         constexpr destroyer( void const * ) noexcept {}
-        static void BF_FASTCALL destroy( function_buffer_base & __restrict buffer ) noexcept { debug_clear( buffer ); }
+        static void BOOST_CC_FASTCALL destroy( function_buffer_base & __restrict buffer ) noexcept { debug_clear( buffer ); }
     };
     template <>
     struct destroyer<support_level::na> { constexpr destroyer( void const * ) noexcept {} };
@@ -572,13 +570,13 @@ namespace detail
     struct cloner
     {
         template <typename Manager> constexpr cloner( Manager const * ) noexcept : clone( &Manager::clone ) {}
-        void (BF_FASTCALL * const clone)( function_buffer_base const &  __restrict in_buffer, function_buffer_base & __restrict out_buffer ) BOOST_AUX_NOEXCEPT_PTR( Level >= support_level::nofail );
+        void (BOOST_CC_FASTCALL * const clone)( function_buffer_base const &  __restrict in_buffer, function_buffer_base & __restrict out_buffer ) BOOST_AUX_NOEXCEPT_PTR( Level >= support_level::nofail );
     };
     template <>
     struct cloner<support_level::trivial>
     {
         constexpr cloner( void const * ) noexcept {}
-        static void BF_FASTCALL clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept { out_buffer = in_buffer; }
+        static void BOOST_CC_FASTCALL clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept { out_buffer = in_buffer; }
     };
     template <>
     struct cloner<support_level::na> { constexpr cloner( void const * ) noexcept {} };
@@ -587,13 +585,13 @@ namespace detail
     struct mover
     {
         template <typename Manager> constexpr mover( Manager const * ) noexcept : move( &Manager::move ) {}
-        void (BF_FASTCALL * const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) BOOST_AUX_NOEXCEPT_PTR( Level >= support_level::nofail );
+        void (BOOST_CC_FASTCALL * const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) BOOST_AUX_NOEXCEPT_PTR( Level >= support_level::nofail );
     };
     template <>
     struct mover<support_level::trivial>
     {
         constexpr mover( void const * ) noexcept {}
-        static void BF_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept { cloner<support_level::trivial>::clone( in_buffer, out_buffer ); }
+        static void BOOST_CC_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept { cloner<support_level::trivial>::clone( in_buffer, out_buffer ); }
     };
     template <>
     struct mover<support_level::na> { constexpr mover( void const * ) noexcept {} };
@@ -604,7 +602,7 @@ namespace detail
     {
         template <typename Manager, typename ActualFunctor, typename StoredFunctor>
         constexpr reflector( std::tuple<Manager, ActualFunctor, StoredFunctor> const * ) noexcept : get_typed_functor( &functor_type_info<ActualFunctor, StoredFunctor, Manager>::get_typed_functor ) {}
-        typed_functor (BF_FASTCALL * const get_typed_functor)( function_buffer_base const & ) noexcept;
+        typed_functor (BOOST_CC_FASTCALL * const get_typed_functor)( function_buffer_base const & ) noexcept;
     };
     template <>
     struct reflector<false> { constexpr reflector( void const * ) noexcept {} };
@@ -633,10 +631,10 @@ namespace detail
     struct invoker<true, ReturnType, InvokerArguments...>
     {
         template <typename Manager, typename StoredFunctor> constexpr invoker( Manager const *, StoredFunctor const * ) noexcept : invoke( &invoke_impl<Manager, StoredFunctor> ) {}
-        ReturnType (BF_FASTCALL * const invoke)( function_buffer_base & buffer, InvokerArguments... args ) noexcept;
+        ReturnType (BOOST_CC_FASTCALL * const invoke)( function_buffer_base & buffer, InvokerArguments... args ) noexcept;
 
         template <typename FunctionObjManager, typename FunctionObj>
-		static ReturnType BF_FASTCALL invoke_impl( detail::function_buffer_base & buffer, InvokerArguments... args ) noexcept
+		static ReturnType BOOST_CC_FASTCALL invoke_impl( detail::function_buffer_base & buffer, InvokerArguments... args ) noexcept
 		{
 			auto & __restrict functionObject( *static_cast<FunctionObj *>( static_cast<void *>( FunctionObjManager::functor_ptr( buffer ) ) ) );
 			return functionObject( args... );
@@ -646,19 +644,19 @@ namespace detail
     struct destroyer<support_level::nofail>
     {
         template <typename Manager> constexpr destroyer( Manager const * ) noexcept : destroy( &Manager::destroy ) {}
-        void (BF_FASTCALL * const destroy)( function_buffer_base &  __restrict buffer ) noexcept;
+        void (BOOST_CC_FASTCALL * const destroy)( function_buffer_base &  __restrict buffer ) noexcept;
     };
     template <>
     struct cloner<support_level::nofail>
     {
         template <typename Manager> constexpr cloner( Manager const * ) noexcept : clone( &Manager::clone ) {}
-        void (BF_FASTCALL * const clone)( function_buffer_base &  __restrict buffer ) noexcept;
+        void (BOOST_CC_FASTCALL * const clone)( function_buffer_base &  __restrict buffer ) noexcept;
     };
     template <>
     struct mover<support_level::nofail>
     {
         template <typename Manager> constexpr mover( Manager const * ) noexcept : move( &Manager::move ) {}
-        void (BF_FASTCALL * const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept;
+        void (BOOST_CC_FASTCALL * const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept;
     };
 #endif // MSVC workaround
     #undef BOOST_AUX_NOEXCEPT_PTR
@@ -840,7 +838,7 @@ namespace detail
 
 		// See the note for the no_eh_state_construction_trick() helper in
 		// function_template.hpp to see the purpose of this constructor.
-		function_base( vtable const & vtable ) { BF_ASSUME( &vtable == p_vtable_ ); }
+		function_base( vtable const & vtable ) { BOOST_ASSUME( &vtable == p_vtable_ ); }
 
 		~function_base() { destroy(); }
 
@@ -850,7 +848,7 @@ namespace detail
 	protected:
         bool empty( void const * const p_empty_handler_vtable ) const noexcept { return get_vtable().is_empty_handler_vtable( p_empty_handler_vtable ); }
 
-		vtable const & get_vtable() const noexcept { BF_ASSUME( p_vtable_ ); return *p_vtable_; }
+		vtable const & get_vtable() const noexcept { BOOST_ASSUME( p_vtable_ ); return *p_vtable_; }
 
 		buffer & functor() const noexcept { return functor_; }
 
@@ -982,7 +980,7 @@ namespace detail
     BOOST_FORCEINLINE bool has_empty_target_aux( T * const funcPtr, member_ptr_tag ) { return has_empty_target<T>( funcPtr, function_ptr_tag() ); }
 
 	template <class Traits>
-    BOOST_FORCEINLINE bool has_empty_target_aux( function_base<Traits> const * const f, function_obj_tag ) { BF_ASSUME( f != nullptr ); return f->empty(); }
+    BOOST_FORCEINLINE bool has_empty_target_aux( function_base<Traits> const * const f, function_obj_tag ) { BOOST_ASSUME( f != nullptr ); return f->empty(); }
 
     // Some compilers seem unable to inline even trivial vararg functions
     // (e.g. MSVC).
@@ -1201,7 +1199,7 @@ public: // Public function interface.
 	callable( callable && f ) noexcept
 		: function_base( static_cast<function_base&&>( f ), empty_handler_vtable() ) {}
 
-	result_type BF_FASTCALL operator()( Arguments... args ) const noexcept( Traits::is_noexcept )
+	result_type BOOST_CC_FASTCALL operator()( Arguments... args ) const noexcept( Traits::is_noexcept )
 	{
         return vtable().invoke( this->functor(), args... );
 	}

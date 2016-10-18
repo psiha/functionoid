@@ -16,15 +16,13 @@
 ////////////////////////////////////////////////////////////////////////////////
 #pragma once
 
-#include <boost/core/typeinfo.hpp>
-#include <boost/config.hpp>
-#include <boost/function_equal.hpp>
+#include <boost/assert.hpp>
+#include <boost/config_ex.hpp>
 #include <boost/throw_exception.hpp>
 
-#include <stdexcept>
-#include <cstddef>
+#include <cstdint>
 #include <memory>
-#include <type_traits>
+#include <stdexcept>
 //------------------------------------------------------------------------------
 namespace boost
 {
@@ -33,19 +31,19 @@ namespace functionoid
 {
 //------------------------------------------------------------------------------
 
-///  The bad_function_call exception class is thrown when an empty
-/// boost::function object is invoked that uses the throw_on_empty empty
+/// The bad_function_call exception class is thrown when an empty
+/// boost::functionoid object is invoked that uses the throw_on_empty empty
 /// handler.
 class bad_function_call : public std::runtime_error
 {
 public:
-  bad_function_call() : std::runtime_error("call to empty boost::function") {}
+  bad_function_call() : std::runtime_error( "call to empty boost::functionoid" ) {}
 };
 
 class throw_on_empty
 {
 private:
-    static void BF_NORETURN throw_bad_call()
+    static void BOOST_NORETURN throw_bad_call()
     {
         boost::throw_exception( bad_function_call() );
     }
@@ -59,7 +57,7 @@ public:
         return detail::function::get_default_value<result_type>( is_reference<result_type>() );
     #endif // BOOST_MSVC
     }
-};
+}; // class throw_on_empty
 
 ///////////////////////////////////////////////////////////////////////////
 struct assert_on_empty { template <class result_type> static result_type handle_empty_invoke() noexcept { handle_empty_invoke<void>(); return{}; } };
@@ -71,7 +69,7 @@ template <> void nop_on_empty::handle_empty_invoke<void>() noexcept {}
 
 enum struct support_level : std::uint8_t
 {
-    na = false,
+    na        = false,
     supported = true,
     nofail,
     trivial

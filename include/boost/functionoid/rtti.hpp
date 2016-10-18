@@ -60,7 +60,7 @@ public:
     core::typeinfo const & functor_type_info() const noexcept { return type_id_; }
 
     template <typename Functor>
-    Functor * BF_FASTCALL target() noexcept
+    Functor * BOOST_CC_FASTCALL target() noexcept
     {
         return static_cast<Functor *>
         (
@@ -74,7 +74,7 @@ public:
     }
 
 private:
-    void * BF_FASTCALL get_functor_if_types_match
+    void * BOOST_CC_FASTCALL get_functor_if_types_match
     (
         core::typeinfo const & other,
         bool const other_const_qualified,
@@ -137,7 +137,7 @@ namespace detail
         }
 
     public:
-        static typed_functor BF_FASTCALL get_typed_functor( function_buffer_base const & buffer ) noexcept
+        static typed_functor BOOST_CC_FASTCALL get_typed_functor( function_buffer_base const & buffer ) noexcept
         {
             auto          * const pFunctor      ( FunctorManager::functor_ptr( const_cast<function_buffer_base &>( buffer ) ) );
             StoredFunctor * const pStoredFunctor( static_cast<StoredFunctor *>( static_cast<void *>( pFunctor ) ) );
