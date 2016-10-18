@@ -52,7 +52,7 @@ using dummy_allocator = std::allocator<void *>;
 union function_buffer_base
 {
 	// For pointers to function objects
-	void * __restrict obj_ptr;
+	void * obj_ptr;
 
 	//  For 'trivial' function objects (that can be managed without type
 	// information) that must be allocated on the heap (we must only save
@@ -756,8 +756,8 @@ public:
     }
 
 protected:
-    using buffer = function_buffer<Traits::sbo_size, Traits::sbo_alignment>;
-	using vtable = vtable<invoker<true, void>, Traits>;
+    using buffer      = function_buffer<Traits::sbo_size, Traits::sbo_alignment>;
+	using base_vtable = vtable<invoker<true, void>, Traits>;
 
 private: // Private helper guard classes.
 	// This needs to be a template only to support stateful empty handlers.
@@ -765,15 +765,15 @@ private: // Private helper guard classes.
 	class cleaner
 	{
 	public:
-		cleaner( callable_base & function, vtable const & empty_handler_vtable )
+		cleaner( callable_base & function, base_vtable const & empty_handler_vtable )
 			:
 			p_function_          ( &function            ),
 			empty_handler_vtable_( empty_handler_vtable )
 		{}
 		cleaner(cleaner const &) = delete;
-		~cleaner() { conditional_clear( p_function_ != 0 ); }
+		~cleaner() { conditional_clear( p_function_ != nullptr ); }
 
-		void cancel() { BOOST_ASSERT( p_function_ ); p_function_ = 0; }
+		void cancel() { BOOST_ASSERT( p_function_ ); p_function_ = nullptr; }
 
 	private:
 		void conditional_clear( bool const clear )
@@ -797,25 +797,25 @@ private: // Private helper guard classes.
 
 	private:
 		callable_base       * p_function_;
-		vtable        const & empty_handler_vtable_;
+		base_vtable   const & empty_handler_vtable_;
 	}; // class cleaner
 
 protected:
 	callable_base() { debug_clear( *this ); }
-	callable_base( callable_base const & other, vtable const & empty_handler_vtable )
+	callable_base( callable_base const & other, base_vtable const & empty_handler_vtable )
 	{
 		debug_clear( *this );
 		assign_functionoid_direct( other, empty_handler_vtable );
 	}
 
-	callable_base( callable_base && other, vtable const & empty_handler_vtable ) noexcept
+	callable_base( callable_base && other, base_vtable const & empty_handler_vtable ) noexcept
 	{
 		debug_clear( *this );
 		assign_functionoid_direct( std::move( other ), empty_handler_vtable );
 	}
 
 	template <class EmptyHandler>
-	callable_base( vtable const & empty_handler_vtable, EmptyHandler )
+	callable_base( base_vtable const & empty_handler_vtable, EmptyHandler )
 	{
 		debug_clear( *this );
 		this->clear<true, EmptyHandler>( empty_handler_vtable );
@@ -823,17 +823,17 @@ protected:
 
 	// See the note for the no_eh_state_construction_trick() helper in
 	// function_template.hpp to see the purpose of this constructor.
-	callable_base( vtable const & vtable ) { BOOST_ASSUME( &vtable == p_vtable_ ); }
+	callable_base( base_vtable const & vtable ) { BOOST_ASSUME( &vtable == p_vtable_ ); }
 
 	~callable_base() { destroy(); }
 
 	template <class EmptyHandler>
-	void swap( callable_base & other, vtable const & empty_handler_vtable );
+	void swap( callable_base & other, base_vtable const & empty_handler_vtable );
 
 protected:
     bool empty( void const * const p_empty_handler_vtable ) const noexcept { return get_vtable().is_empty_handler_vtable( p_empty_handler_vtable ); }
 
-	vtable const & get_vtable() const noexcept { BOOST_ASSUME( p_vtable_ ); return *p_vtable_; }
+	auto const & get_vtable() const noexcept { BOOST_ASSUME( p_vtable_ ); return *p_vtable_; }
 
 	buffer & functor() const noexcept { return functor_; }
 
@@ -892,26 +892,26 @@ protected:
 	template <typename EmptyHandler, typename F, typename Allocator>
 	void actual_assign
 	(
-		F            &&       f,
-		vtable const &        functor_vtable,
-		vtable const &        /*empty_handler_vtable*/,
-		Allocator       const a,
+		F                 &&      f,
+		base_vtable const &       functor_vtable,
+		base_vtable const &     /*empty_handler_vtable*/,
+		Allocator           const a,
 		std::true_type /*can use direct assign*/
 	) noexcept
 	{
 		using functor_manager = functor_manager<F, Allocator, buffer>;
 		this->destroy();
-		functor_manager::assign(std::forward<F>(f), this->functor_, a);
+		functor_manager::assign( std::forward<F>(f), this->functor_, a );
 		this->p_vtable_ = &functor_vtable;
 	}
 
 	template <typename EmptyHandler, typename F, typename Allocator>
 	void actual_assign
 	(
-		F            &&       f,
-		vtable const &        functor_vtable,
-		vtable const &        empty_handler_vtable,
-		Allocator       const a,
+		F                 &&       f,
+		base_vtable const &        functor_vtable,
+		base_vtable const &        empty_handler_vtable,
+		Allocator            const a,
 		std::false_type /*must use safe assignment*/
 	)
 	{
