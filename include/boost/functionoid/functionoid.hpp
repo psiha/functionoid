@@ -157,9 +157,6 @@ private:
             buffer
         >;
 
-        // A minimally typed manager is used for the invoker (anti-code-bloat).
-        using invoker_manager_type = functor_manager<StoredFunctor, Allocator, buffer>;
-
         static_assert
         (
             std::is_same<ActualFunctor, empty_handler>::value

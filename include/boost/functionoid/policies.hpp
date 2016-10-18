@@ -50,13 +50,7 @@ private:
 
 public:
     template <class result_type>
-    static result_type handle_empty_invoke()
-    {
-        throw_bad_call();
-    #ifndef BF_HAS_NORETURN
-        return detail::function::get_default_value<result_type>( is_reference<result_type>() );
-    #endif // BOOST_MSVC
-    }
+    static result_type handle_empty_invoke() { throw_bad_call(); }
 }; // class throw_on_empty
 
 ///////////////////////////////////////////////////////////////////////////
