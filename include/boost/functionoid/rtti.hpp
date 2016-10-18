@@ -85,7 +85,7 @@ private:
         // cv-qualifiers, but we can't take them away.
         bool const types_match
         (
-            type_id_ == other
+            ( type_id_ == other )
                 &
             ( !const_qualified_ | other_const_qualified )
                 &
