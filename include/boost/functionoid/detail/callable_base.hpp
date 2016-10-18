@@ -81,8 +81,8 @@ union alignas( Alignment ) function_buffer
 	function_buffer_base base;
 	char bytes[ Size ];
 
-			    operator function_buffer_base       && () &&    noexcept { return std::move( base ); }
-		        operator function_buffer_base       &  ()       noexcept { return base; }
+			  operator function_buffer_base       && () &&    noexcept { return std::move( base ); }
+		      operator function_buffer_base       &  ()       noexcept { return base; }
 	constexpr operator function_buffer_base const &  () const noexcept { return base; }
 
     static function_buffer       & from_base( function_buffer_base       & base ) noexcept { return reinterpret_cast<function_buffer       &>( base ); }
