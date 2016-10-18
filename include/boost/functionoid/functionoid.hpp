@@ -16,6 +16,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 #pragma once
 
+#include "functionoid_fwd.hpp"
+
 #include <boost/assert.hpp>
 #include <boost/core/ignore_unused.hpp>
 #include <boost/core/typeinfo.hpp>
@@ -48,13 +50,6 @@ template <typename T> class reference_wrapper;
 namespace functionoid
 {
 //------------------------------------------------------------------------------
-
-struct default_traits;
-
-class typed_functor;
-
-template <typename Signature, typename Traits = default_traits>
-class callable;
 
 namespace detail
 {
