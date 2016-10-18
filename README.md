@@ -1,3 +1,4 @@
+#### Old notes (before conversion to C++14, renaming to functionoid/callable)
 
 An alternate boost::function implementation that
 - minimizes template and RTTI bloat
