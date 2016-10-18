@@ -16,8 +16,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 #pragma once
 
-#include "functionoid_fwd.hpp"
 #include "detail/callable_base.hpp"
+#include "functionoid_fwd.hpp"
 
 #include <boost/assert.hpp>
 

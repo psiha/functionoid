@@ -18,8 +18,6 @@
 #define callable_base_hpp__2785487C_DC49_4E29_96D0_E0D00C85E40A
 #pragma once
 //------------------------------------------------------------------------------
-#include "functionoid_fwd.hpp"
-
 #include <boost/assert.hpp>
 #include <boost/core/ignore_unused.hpp>
 #include <boost/core/typeinfo.hpp>
