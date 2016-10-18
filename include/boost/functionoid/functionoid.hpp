@@ -64,7 +64,7 @@ private: // Private implementation types.
         }
     };
 
-    using base_vtable = typename detail::callable_base<Traits>::vtable;
+    using base_vtable = typename detail::callable_base<Traits>::base_vtable;
     using vtable_type = detail::vtable<detail::invoker<Traits::is_noexcept, ReturnType, Arguments...>, Traits>;
 
 public: // Public function interface.
@@ -210,11 +210,7 @@ private:
     void do_assign( F && f )
     {
         using functor_type = typename std::remove_reference<F>::type;
-    #ifdef __clang__ // Xcode8 Apple Clang dubious compiler error workaround.
-        struct allocator : Traits:: template allocator<functor_type> { using Traits:: template allocator<functor_type>::allocator; };
-    #else
-        using allocator = Traits:: template allocator<functor_type>;
-    #endif // __clang__
+        using allocator    = typename Traits:: template allocator<functor_type>;
         do_assign<direct>( std::forward<F>( f ), allocator() );
     }
 

@@ -838,7 +838,7 @@ protected:
 	buffer & functor() const noexcept { return functor_; }
 
 	template <bool direct, class EmptyHandler>
-	void clear( vtable const & empty_handler_vtable ) noexcept
+	void clear( base_vtable const & empty_handler_vtable ) noexcept
 	{
 		// For stateless empty handlers a full assign is not necessary here
 		// but a simple this->p_vtable_ = &empty_handler_vtable...
@@ -857,9 +857,9 @@ protected:
 	template <bool direct, typename EmptyHandler, typename FunctionObj, typename Allocator>
 	void assign
 	(
-		FunctionObj  && f,
-		vtable const &  functor_vtable,
-		vtable const &  empty_handler_vtable,
+		FunctionObj       && f,
+		base_vtable const &  functor_vtable,
+		base_vtable const &  empty_handler_vtable,
 		Allocator,
 		std::true_type /*assignment of an instance of the same callable instantiation*/
 	)
@@ -882,9 +882,9 @@ protected:
 	template <bool direct, typename EmptyHandler, typename FunctionObj, typename Allocator>
 	void assign
 	(
-		FunctionObj  && f,
-		vtable const &  functor_vtable,
-		vtable const &  empty_handler_vtable,
+		FunctionObj       && f,
+		base_vtable const &  functor_vtable,
+		base_vtable const &  empty_handler_vtable,
 		Allocator,
 		std::false_type /*generic assign*/
 	);
@@ -926,13 +926,13 @@ protected:
 	}
 
 private: // Assignment from another functionoid helpers.
-	void assign_functionoid_direct( callable_base const & source, vtable const & /*empty_handler_vtable*/ ) noexcept
+	void assign_functionoid_direct( callable_base const & source, base_vtable const & /*empty_handler_vtable*/ ) noexcept
 	{
 		source.get_vtable().clone( source.functor_, this->functor_ );
 		p_vtable_ = &source.get_vtable();
 	}
 
-	void assign_functionoid_direct( callable_base && source, vtable const & empty_handler_vtable ) noexcept
+	void assign_functionoid_direct( callable_base && source, base_vtable const & empty_handler_vtable ) noexcept
 	{
 		source.get_vtable().move( std::move( source.functor_ ), this->functor_ );
 		this ->p_vtable_ = &source.get_vtable();
@@ -940,7 +940,7 @@ private: // Assignment from another functionoid helpers.
 	}
 
 	template <typename EmptyHandler, typename FunctionBaseRef>
-	void assign_functionoid_guarded( FunctionBaseRef && source, vtable const & empty_handler_vtable )
+	void assign_functionoid_guarded( FunctionBaseRef && source, base_vtable const & empty_handler_vtable )
 	{
 		this->destroy();
 		cleaner<EmptyHandler> guard( *this, empty_handler_vtable );
@@ -954,8 +954,8 @@ private:
 	class safe_mover_base;
 	template <class EmptyHandler> class safe_mover;
 
-			vtable const * p_vtable_;
-	mutable buffer         functor_ ;
+			base_vtable const * p_vtable_;
+	mutable buffer              functor_ ;
 }; // class function_base
 
 template <typename T>
@@ -998,11 +998,11 @@ template <typename Traits>
 class callable_base<Traits>::safe_mover_base
 {
 protected:
-	using functor = typename callable_base<Traits>::buffer;
-	using vtable  = typename callable_base<Traits>::vtable;
+	using functor     = typename callable_base<Traits>::buffer     ;
+	using base_vtable = typename callable_base<Traits>::base_vtable;
 
 protected:
-	safe_mover_base(safe_mover_base const&) = delete;
+	safe_mover_base( safe_mover_base const & ) = delete;
 	~safe_mover_base() = default;
 
 public:
@@ -1019,7 +1019,7 @@ public:
 public:
 	void cancel() { BOOST_ASSERT( p_function_to_restore_to_ ); p_function_to_restore_to_ = 0; }
 
-	static void move( callable_base & source, callable_base & destination, vtable const & empty_handler_vtable )
+	static void move( callable_base & source, callable_base & destination, base_vtable const & empty_handler_vtable )
 	{
 		source.get_vtable().move( std::move( source.functor_ ), destination.functor_ );
 		destination.p_vtable_ = source.p_vtable_;
@@ -1027,9 +1027,9 @@ public:
 	}
 
 protected:
-	callable_base * __restrict p_function_to_restore_to_ ;
-	callable_base & __restrict empty_function_to_move_to_;
-	vtable const  & __restrict empty_handler_vtable_     ;
+	callable_base       * __restrict p_function_to_restore_to_ ;
+	callable_base       & __restrict empty_function_to_move_to_;
+	base_vtable   const & __restrict empty_handler_vtable_     ;
 }; // safe_mover_base
 
 // ...if the is_stateless<EmptyHandler> requirement sticks this will not need
@@ -1053,7 +1053,7 @@ public:
 
 template <class Traits>
 template <class EmptyHandler>
-void callable_base<Traits>::swap( callable_base & other, vtable const & empty_handler_vtable )
+void callable_base<Traits>::swap( callable_base & other, base_vtable const & empty_handler_vtable )
 {
 	if ( &other == this )
 		return;
@@ -1073,10 +1073,10 @@ template <typename Traits>
 template <bool direct, typename EmptyHandler, typename F, typename Allocator>
 void callable_base<Traits>::assign
 (
-	F            &&       f,
-	vtable const &        functor_vtable,
-	vtable const &        empty_handler_vtable,
-	Allocator       const a,
+	F                 &&       f,
+	base_vtable const &        functor_vtable,
+	base_vtable const &        empty_handler_vtable,
+	Allocator            const a,
 	std::false_type /*generic assign*/
 )
 {
