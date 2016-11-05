@@ -153,6 +153,11 @@ namespace detail
 template <typename Signature, typename Traits>
 class callable;
 
+// http://stackoverflow.com/questions/20833453/comparing-stdfunctions-for-equality
+// https://stackoverflow.com/questions/3629835/why-is-stdfunction-not-equality-comparable
+// http://www.boost.org/doc/libs/release/doc/html/function/faq.html
+// http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2004/n1667.pdf
+
 template <typename Signature, typename Traits, typename Functor> bool operator==( callable<Signature, Traits> const & f, std::nullptr_t ) { return f.empty(); }
 template <typename Signature, typename Traits, typename Functor> bool operator==( std::nullptr_t, callable<Signature, Traits> const & f ) { return f.empty(); }
 
