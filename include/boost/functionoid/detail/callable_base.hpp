@@ -833,6 +833,25 @@ protected:
 protected:
     bool empty( void const * const p_empty_handler_vtable ) const noexcept { return get_vtable().is_empty_handler_vtable( p_empty_handler_vtable ); }
 
+    /// \todo Add atomic vtable accessors that would enable lock-free operation
+    /// for basic functionality (such as empty(), clear() and operator()()) w/o
+    /// requiring an additional std::atomic<bool> is_my_functionoid_set-like
+    /// variable.
+    /// Making the vtable pointer a std::atomic<base_vtable const *> is not an
+    /// option currently because even with std::memory_order_relaxed access the
+    /// variable is accessed 'like a volatile' which produces bad codegen (e.g.
+    /// it is reread from memory for every access).
+    /// Atomic operations on non-atomic data:
+    /// http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2014/n4013.html
+    /// Making std::function safe for concurrency:
+    /// http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2015/n4348.html
+    /// Atomic Smart Pointers:
+    /// http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2014/n4058.pdf
+    /// Overloaded and qualified std::function:
+    /// (for 'automatic' atomic vtable access through volatile member function
+    /// overloads)
+    /// http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2015/p0045r0.pdf
+    ///                                       (08.11.2016.) (Domagoj Saric)
 	auto const & get_vtable() const noexcept { BOOST_ASSUME( p_vtable_ ); return *p_vtable_; }
 
 	buffer & functor() const noexcept { return functor_; }
