@@ -635,7 +635,7 @@ template <>
 struct cloner<support_level::nofail>
 {
     template <typename Manager> constexpr cloner( Manager const * ) noexcept : clone( &Manager::clone ) {}
-    void (BOOST_CC_FASTCALL * const clone)( function_buffer_base &  __restrict buffer ) noexcept;
+    void (BOOST_CC_FASTCALL * const clone)( function_buffer_base const &  __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept;
 };
 template <>
 struct mover<support_level::nofail>
@@ -710,6 +710,13 @@ struct vtable
 template <class Invoker, class Manager, class ActualFunctor, class StoredFunctor, class IsEmptyHandler, typename Traits>
 struct vtable_holder
 {
+    static_assert
+    (
+        ( Traits::destructor != support_level::trivial ) ||
+        std::is_trivially_destructible<StoredFunctor>::value,
+        "Assigned function object requires a non-trivial destructor."
+    );
+
     static constexpr Invoker       const * invoker_type        = nullptr;
     static constexpr Manager       const * manager_type        = nullptr;
     static constexpr ActualFunctor const * actual_functor_type = nullptr;
@@ -953,7 +960,7 @@ private: // Assignment from another functionoid helpers.
 
 	void assign_functionoid_direct( callable_base && source, base_vtable const & empty_handler_vtable ) noexcept
 	{
-		source.get_vtable().move( std::move( source.functor_ ), this->functor_ );
+        source.move_to( *this, std::integral_constant<bool, Traits::moveable != support_level::na>() );
 		this ->p_vtable_ = &source.get_vtable();
 		source.p_vtable_ = &empty_handler_vtable;
 	}
@@ -968,6 +975,9 @@ private: // Assignment from another functionoid helpers.
 	}
 
 	void destroy() noexcept { get_vtable().destroy( this->functor_ ); }
+
+    void move_to( callable_base & destination, std::true_type  /*    has move*/ ) const noexcept( Traits::moveable >= support_level::nofail ) { get_vtable().move ( std::move( this->functor_ ), destination.functor_ ); }
+    void move_to( callable_base & destination, std::false_type /*not has move*/ ) const noexcept( Traits::copyable >= support_level::nofail ) { get_vtable().clone( std::move( this->functor_ ), destination.functor_ ); }
 
 private:
 	class safe_mover_base;
@@ -1040,7 +1050,7 @@ public:
 
 	static void move( callable_base & source, callable_base & destination, base_vtable const & empty_handler_vtable )
 	{
-		source.get_vtable().move( std::move( source.functor_ ), destination.functor_ );
+        source.move_to( destination, std::integral_constant<bool, Traits::moveable != support_level::na>() );
 		destination.p_vtable_ = source.p_vtable_;
 		source     .p_vtable_ = &empty_handler_vtable;
 	}
