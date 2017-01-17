@@ -263,7 +263,7 @@ private:
     vtable_type const & no_eh_state_construction_trick( FunctionObj && f )
     {
 		using NakedFunctionObj = typename std::remove_const<typename std::remove_reference<FunctionObj>::type>::type;
-		return no_eh_state_construction_trick( std::forward<FunctionObj>( f ), Traits:: template allocator<NakedFunctionObj>() );
+		return no_eh_state_construction_trick( std::forward<FunctionObj>( f ), typename Traits:: template allocator<NakedFunctionObj>() );
     }
 }; // class callable
 
