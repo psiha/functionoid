@@ -183,7 +183,10 @@ struct manager_ptr
     static void assign( Functor const functor, function_buffer_base & out_buffer, Allocator ) noexcept
     {
         static_assert( functor_traits<Functor, function_buffer_base>::allowsPtrObjectOptimization, "" );
-        BOOST_ASSUME( &out_buffer ); // MSVC14 still generates a branch w/o this.
+#   ifdef _MSC_VER
+        // MSVC14 still generates a branch w/o this (GCC issues a warning that it knows that &out_buffer cannot be null so we have to ifdef guard this).
+        BOOST_ASSUME( &out_buffer );
+#   endif // _MSC_VER
         new ( functor_ptr( out_buffer ) ) Functor( functor );
     }
 
@@ -220,7 +223,10 @@ struct manager_trivial_small
 			functor_traits<Functor, Buffer>::allowsPODOptimization &&
 			functor_traits<Functor, Buffer>::allowsSmallObjectOptimization, ""
         );
-        BOOST_ASSUME( &out_buffer ); // MSVC14 still generates a branch w/o this.
+#   ifdef _MSC_VER
+        // MSVC14 still generates a branch w/o this (GCC issues a warning that it knows that &out_buffer cannot be null so we have to ifdef guard this).
+        BOOST_ASSUME( &out_buffer );
+#   endif // _MSC_VER
         new ( functor_ptr( out_buffer ) ) Functor( functor );
     }
 
@@ -309,7 +315,10 @@ struct manager_small
     template <typename F, typename Allocator>
     static void assign( F && functor, Buffer & out_buffer, Allocator ) noexcept( noexcept( Functor( std::forward<F>( functor ) ) ) )
     {
-        BOOST_ASSUME( &out_buffer ); // MSVC14 still generates a branch w/o this.
+#   ifdef _MSC_VER
+        // MSVC14 still generates a branch w/o this (GCC issues a warning that it knows that &out_buffer cannot be null so we have to ifdef guard this).
+        BOOST_ASSUME( &out_buffer );
+#   endif // _MSC_VER
         new ( functor_ptr( out_buffer ) ) Functor( std::forward<F>( functor ) );
     }
 
