@@ -82,10 +82,10 @@ public: // Public function interface.
     callable( signature_type * const plain_function_pointer ) noexcept
         : function_base( no_eh_state_construction_trick( plain_function_pointer ) ) {}
 
-    callable( callable const & f )
+    callable( callable const & f ) noexcept( Traits::copyable >= support_level::nofail )
         : function_base( static_cast<function_base const &>( f ), empty_handler_vtable() ) { static_assert( Traits::copyable > support_level::na, "This callable instantiation is not copyable." ); }
 
-	callable( callable && f ) noexcept
+	callable( callable && f ) noexcept( Traits::moveable >= support_level::nofail )
 		: function_base( static_cast<function_base&&>( f ), empty_handler_vtable() ) {}
 
 	result_type BOOST_CC_FASTCALL operator()( Arguments... args ) const noexcept( Traits::is_noexcept )
@@ -93,8 +93,8 @@ public: // Public function interface.
         return vtable().invoke( this->functor(), args... );
 	}
 
-    callable & operator=( callable const & f ) { { static_assert( Traits::copyable, "This callable instantiation is not copyable." ); } this->assign( f ); return *this; }
-	callable & operator=( callable && f ) noexcept { this->assign( std::move( f ) ); return *this; }
+    callable & operator=( callable const  & f ) noexcept( Traits::copyable >= support_level::nofail ) { static_assert( Traits::copyable > support_level::na, "This callable instantiation is not copyable." ); this->assign( f ); return *this; }
+    callable & operator=( callable       && f ) noexcept( Traits::moveable >= support_level::nofail ) { static_assert( Traits::moveable > support_level::na, "This callable instantiation is not moveable." ); this->assign( std::move( f ) ); return *this; }
     callable & operator=( signature_type * const plain_function_pointer ) noexcept { this->assign( plain_function_pointer ); return *this; }
     template <typename F>
     callable & operator=( F && f ) noexcept { this->assign( std::forward<F>( f ) ); return *this; }
@@ -132,7 +132,7 @@ private:
     static vtable_type const & vtable_for_functor_aux( std::true_type /*is a callable*/, callable const & functor )
     {
         static_assert( std::is_base_of<callable, typename std::remove_reference<ActualFunctor>::type>::value, "" );
-        return functor.get_vtable();
+        return functor.vtable();
     }
 
     template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
@@ -209,7 +209,7 @@ private:
     template <bool direct, typename F>
     void do_assign( F && f )
     {
-        using functor_type = typename std::remove_reference<F>::type;
+        using functor_type = typename std::remove_const<typename std::remove_reference<F>::type>::type;
         using allocator    = typename Traits:: template allocator<functor_type>;
         do_assign<direct>( std::forward<F>( f ), allocator() );
     }
@@ -250,9 +250,13 @@ private:
     }
 
     template <typename FunctionObj, typename Allocator>
-    vtable_type const & no_eh_state_construction_trick( FunctionObj && f, Allocator const a )
+    base_vtable const & no_eh_state_construction_trick( FunctionObj && f, Allocator const a )
     {
-		static_assert( Traits::copyable != support_level::na || std::is_copy_constructible<FunctionObj>::value, "This callable instantiation requires copyable function objects." );
+		static_assert
+        (
+            Traits::copyable != support_level::na || std::is_copy_constructible<FunctionObj>::value,
+            "This callable instantiation requires copyable function objects."
+        );
 
         detail::debug_clear( *this );
         do_assign<true>( std::forward<FunctionObj>( f ), a );
@@ -260,7 +264,7 @@ private:
     }
 
     template <typename FunctionObj>
-    vtable_type const & no_eh_state_construction_trick( FunctionObj && f )
+    base_vtable const & no_eh_state_construction_trick( FunctionObj && f )
     {
 		using NakedFunctionObj = typename std::remove_const<typename std::remove_reference<FunctionObj>::type>::type;
 		return no_eh_state_construction_trick( std::forward<FunctionObj>( f ), typename Traits:: template allocator<NakedFunctionObj>() );
