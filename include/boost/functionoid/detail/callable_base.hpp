@@ -183,6 +183,7 @@ struct manager_ptr
     static void assign( Functor const functor, function_buffer_base & out_buffer, Allocator ) noexcept
     {
         static_assert( functor_traits<Functor, function_buffer_base>::allowsPtrObjectOptimization, "" );
+        BOOST_ASSUME( &out_buffer ); // MSVC14 still generates a branch w/o this.
         new ( functor_ptr( out_buffer ) ) Functor( functor );
     }
 
@@ -219,6 +220,7 @@ struct manager_trivial_small
 			functor_traits<Functor, Buffer>::allowsPODOptimization &&
 			functor_traits<Functor, Buffer>::allowsSmallObjectOptimization, ""
         );
+        BOOST_ASSUME( &out_buffer ); // MSVC14 still generates a branch w/o this.
         new ( functor_ptr( out_buffer ) ) Functor( functor );
     }
 
@@ -307,6 +309,7 @@ struct manager_small
     template <typename F, typename Allocator>
     static void assign( F && functor, Buffer & out_buffer, Allocator ) noexcept( noexcept( Functor( std::forward<F>( functor ) ) ) )
     {
+        BOOST_ASSUME( &out_buffer ); // MSVC14 still generates a branch w/o this.
         new ( functor_ptr( out_buffer ) ) Functor( std::forward<F>( functor ) );
     }
 
@@ -808,7 +811,7 @@ private: // Private helper guard classes.
 	}; // class cleaner
 
 protected:
-	callable_base() { debug_clear( *this ); }
+	callable_base() noexcept { debug_clear( *this ); }
 	callable_base( callable_base const & other, base_vtable const & empty_handler_vtable )
 	{
 		debug_clear( *this );
@@ -822,7 +825,7 @@ protected:
 	}
 
 	template <class EmptyHandler>
-	callable_base( base_vtable const & empty_handler_vtable, EmptyHandler )
+	callable_base( base_vtable const & empty_handler_vtable, EmptyHandler ) noexcept
 	{
 		debug_clear( *this );
 		this->clear<true, EmptyHandler>( empty_handler_vtable );
@@ -830,12 +833,12 @@ protected:
 
 	// See the note for the no_eh_state_construction_trick() helper in
 	// function_template.hpp to see the purpose of this constructor.
-	callable_base( base_vtable const & vtable ) { BOOST_ASSUME( &vtable == p_vtable_ ); }
+	callable_base( base_vtable const & vtable ) noexcept { BOOST_ASSUME( &vtable == p_vtable_ ); }
 
-	~callable_base() { destroy(); }
+	~callable_base() noexcept { destroy(); }
 
 	template <class EmptyHandler>
-	void swap( callable_base & other, base_vtable const & empty_handler_vtable );
+	void swap( callable_base & other, base_vtable const & empty_handler_vtable ) noexcept;
 
 protected:
     bool empty( void const * const p_empty_handler_vtable ) const noexcept { return get_vtable().is_empty_handler_vtable( p_empty_handler_vtable ); }
@@ -895,7 +898,7 @@ protected:
 		if ( direct )
 		{
 			BOOST_ASSERT( &static_cast<callable_base const &>( f ) != this );
-			BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable );
+			BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable || /*just being constructed/inside no_eh_state_construction_trick() in a debug build:*/ this->p_vtable_ == nullptr );
 			assign_functionoid_direct( std::forward<FunctionObj>( f ), empty_handler_vtable );
 		}
 		else if ( &static_cast<callable_base const &>( f ) != this )
@@ -952,13 +955,13 @@ protected:
 	}
 
 private: // Assignment from another functionoid helpers.
-	void assign_functionoid_direct( callable_base const & source, base_vtable const & /*empty_handler_vtable*/ ) noexcept
+	void assign_functionoid_direct( callable_base const & source, base_vtable const & /*empty_handler_vtable*/ ) noexcept( Traits::copyable >= support_level::nofail )
 	{
 		source.get_vtable().clone( source.functor_, this->functor_ );
 		p_vtable_ = &source.get_vtable();
 	}
 
-	void assign_functionoid_direct( callable_base && source, base_vtable const & empty_handler_vtable ) noexcept
+	void assign_functionoid_direct( callable_base && source, base_vtable const & empty_handler_vtable ) noexcept( ( Traits::moveable >= support_level::nofail ) || ( Traits::moveable == support_level::na && Traits::copyable >= support_level::nofail ) )
 	{
         source.move_to( *this, std::integral_constant<bool, Traits::moveable != support_level::na>() );
 		this ->p_vtable_ = &source.get_vtable();
@@ -1082,7 +1085,7 @@ public:
 
 template <class Traits>
 template <class EmptyHandler>
-void callable_base<Traits>::swap( callable_base & other, base_vtable const & empty_handler_vtable )
+void callable_base<Traits>::swap( callable_base & other, base_vtable const & empty_handler_vtable ) noexcept
 {
 	if ( &other == this )
 		return;
