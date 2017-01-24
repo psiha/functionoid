@@ -292,7 +292,7 @@ private:
     {
         static_assert
         (
-            Traits::copyable != support_level::na || std::is_constructible<StoredFunctor, ActualFunctor>::value,
+            Traits::copyable != support_level::na || std::is_copy_constructible<StoredFunctor>::value,
             "This callable instantiation requires copyable function objects."
         );
 
