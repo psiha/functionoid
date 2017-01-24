@@ -67,20 +67,73 @@ private: // Private implementation types.
     using base_vtable = typename detail::callable_base<Traits>::base_vtable;
     using vtable_type = detail::vtable<detail::invoker<Traits::is_noexcept, ReturnType, Arguments...>, Traits>;
 
+    /// \note
+    ///   Simply default-constructing callable_base and then performing proper
+    /// initialization in the body of the derived class constructor has
+    /// unfortunate efficiency implications because it creates unnecessary
+    /// EH states (=unnecessary bloat) in case of non-trivial
+    /// (i.e. fallible/throwable) constructors of derived classes (when
+    /// constructing from/with complex function objects).
+    ///   In such cases the compiler has to generate EH code to call the
+    /// (non-trivial) callable_base destructor if the derived-class constructor
+    /// fails after callable_base is already constructed. This is completely
+    /// redundant because initially callable_base is/was always initialized with
+    /// the empty handler for which no destruction is necessary but the compiler
+    /// does not see this due to the indirect vtable call.
+    ///   Because of the above issue, the helper ne_eh_state_* functionality is
+    /// used as a quick-hack to actually construct the callable_base object
+    /// before the callable_base constructor is called.
+    /// The entire object is also cleared beforehand in debugging builds to
+    /// allow checking that the vtable and/or the function_buffer are not used
+    /// before being initialized.
+    ///   Using a plain callable<> member function that does the construction
+    /// and then simply calling the empty callable_base default constructor
+    /// was crashing (i.e. producing bad codegen) in release builds with GCC 6
+    /// and Clang 3.9 (when used with libstdc++ as opposed to libc++; why that
+    /// makes any difference in this case is one huge ?...) - the fix was to
+    /// move the construction code into the callable_base constructor with a
+    /// 'constructor' functor (that can call callable internals required for
+    /// proper construction).
+    ///                                       (24.11.2017.) (Domagoj Saric)
+    /// \todo Devise a cleaner way to deal with all of this (maybe move/add more
+    /// template methods to function_base so that it can call assign methods
+    /// from its template constructors thereby moving all construction code
+    /// there).
+    ///                                       (02.11.2010.) (Domagoj Saric)
+    struct no_eh_state_constructor
+    {
+        template <typename F, typename Allocator>
+        base_vtable const & operator()( function_base & base, F && f, Allocator const a ) const noexcept( std::is_nothrow_constructible<std::remove_reference_t<F>, F>::value )
+        {
+            detail::debug_clear( base );
+            static_cast<callable &>( base ).do_assign<true>( std::forward<F>( f ), a );
+            return static_cast<callable &>( base ).vtable();
+        }
+
+        template <typename F>
+        base_vtable const & operator()( function_base & base, F && f ) const noexcept( std::is_nothrow_constructible<std::remove_reference_t<F>, F>::value )
+        {
+		    using NakedFunctionObj = typename std::remove_const<typename std::remove_reference<F>::type>::type;
+		    return (*this)( base, std::forward<F>( f ), typename Traits:: template allocator<NakedFunctionObj>() );
+        }
+    }; // struct no_eh_state_constructor
+
+    using no_eh_state_construction_trick_tag = typename function_base::no_eh_state_construction_trick_tag;
+
 public: // Public function interface.
 
     callable() noexcept : function_base( empty_handler_vtable(), empty_handler() ) {}
 
     template <typename Functor>
-    callable( Functor && f )
-        : function_base( no_eh_state_construction_trick( std::forward<Functor>( f ) ) ) {}
+    callable( Functor && f ) noexcept( std::is_nothrow_constructible<std::remove_reference_t<Functor>, Functor>::value /*...mrmlj...&& !is_heap_allocated*/ )
+        : function_base( no_eh_state_construction_trick_tag(), no_eh_state_constructor(), std::forward<Functor>( f ) ) {}
 
     template <typename Functor, typename Allocator>
-    callable( Functor && f, Allocator const a )
-        : function_base( no_eh_state_construction_trick( std::forward<Functor>( f ), a ) ) {}
+    callable( Functor && f, Allocator const a ) noexcept( std::is_nothrow_constructible<std::remove_reference_t<Functor>, Functor>::value /*...mrmlj...&& !is_heap_allocated*/ )
+        : function_base( no_eh_state_construction_trick_tag(), no_eh_state_constructor(), std::forward<Functor>( f ), a ) {}
 
     callable( signature_type * const plain_function_pointer ) noexcept
-        : function_base( no_eh_state_construction_trick( plain_function_pointer ) ) {}
+        : function_base( no_eh_state_construction_trick_tag(), no_eh_state_constructor(), plain_function_pointer ) {}
 
     callable( callable const & f ) noexcept( Traits::copyable >= support_level::nofail )
         : function_base( static_cast<function_base const &>( f ), empty_handler_vtable() ) { static_assert( Traits::copyable > support_level::na, "This callable instantiation is not copyable." ); }
@@ -237,6 +290,12 @@ private:
     template <bool direct, typename ActualFunctor, typename StoredFunctor, typename ActualFunctorAllocator>
     void do_assign( ActualFunctor const &, StoredFunctor && stored_functor, ActualFunctorAllocator const a )
     {
+        static_assert
+        (
+            Traits::copyable != support_level::na || std::is_constructible<StoredFunctor, ActualFunctor>::value,
+            "This callable instantiation requires copyable function objects."
+        );
+
 		using NakedStoredFunctor = typename std::remove_const<typename std::remove_reference<StoredFunctor>::type>::type;
         using StoredFunctorAllocator = typename ActualFunctorAllocator:: template rebind<NakedStoredFunctor>::other;
         function_base:: template assign<direct, empty_handler>
@@ -247,27 +306,6 @@ private:
             StoredFunctorAllocator( a ),
             std::is_base_of<callable, NakedStoredFunctor>() /*are we assigning another callable?*/
         );
-    }
-
-    template <typename FunctionObj, typename Allocator>
-    base_vtable const & no_eh_state_construction_trick( FunctionObj && f, Allocator const a )
-    {
-		static_assert
-        (
-            Traits::copyable != support_level::na || std::is_copy_constructible<FunctionObj>::value,
-            "This callable instantiation requires copyable function objects."
-        );
-
-        detail::debug_clear( *this );
-        do_assign<true>( std::forward<FunctionObj>( f ), a );
-        return function_base::get_vtable();
-    }
-
-    template <typename FunctionObj>
-    base_vtable const & no_eh_state_construction_trick( FunctionObj && f )
-    {
-		using NakedFunctionObj = typename std::remove_const<typename std::remove_reference<FunctionObj>::type>::type;
-		return no_eh_state_construction_trick( std::forward<FunctionObj>( f ), typename Traits:: template allocator<NakedFunctionObj>() );
     }
 }; // class callable
 

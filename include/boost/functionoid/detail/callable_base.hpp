@@ -184,7 +184,7 @@ struct manager_ptr
     {
         static_assert( functor_traits<Functor, function_buffer_base>::allowsPtrObjectOptimization, "" );
 #   ifdef _MSC_VER
-        // MSVC14 still generates a branch w/o this (GCC issues a warning that it knows that &out_buffer cannot be null so we have to ifdef guard this).
+        // MSVC14u3 still generates a branch w/o this (GCC issues a warning that it knows that &out_buffer cannot be null so we have to ifdef guard this).
         BOOST_ASSUME( &out_buffer );
 #   endif // _MSC_VER
         new ( functor_ptr( out_buffer ) ) Functor( functor );
@@ -224,7 +224,7 @@ struct manager_trivial_small
 			functor_traits<Functor, Buffer>::allowsSmallObjectOptimization, ""
         );
 #   ifdef _MSC_VER
-        // MSVC14 still generates a branch w/o this (GCC issues a warning that it knows that &out_buffer cannot be null so we have to ifdef guard this).
+        // MSVC14u3 still generates a branch w/o this (GCC issues a warning that it knows that &out_buffer cannot be null so we have to ifdef guard this).
         BOOST_ASSUME( &out_buffer );
 #   endif // _MSC_VER
         new ( functor_ptr( out_buffer ) ) Functor( functor );
@@ -316,7 +316,7 @@ struct manager_small
     static void assign( F && functor, Buffer & out_buffer, Allocator ) noexcept( noexcept( Functor( std::forward<F>( functor ) ) ) )
     {
 #   ifdef _MSC_VER
-        // MSVC14 still generates a branch w/o this (GCC issues a warning that it knows that &out_buffer cannot be null so we have to ifdef guard this).
+        // MSVC14u3 still generates a branch w/o this (GCC issues a warning that it knows that &out_buffer cannot be null so we have to ifdef guard this).
         BOOST_ASSUME( &out_buffer );
 #   endif // _MSC_VER
         new ( functor_ptr( out_buffer ) ) Functor( std::forward<F>( functor ) );
@@ -840,9 +840,14 @@ protected:
 		this->clear<true, EmptyHandler>( empty_handler_vtable );
 	}
 
-	// See the note for the no_eh_state_construction_trick() helper in
-	// function_template.hpp to see the purpose of this constructor.
-	callable_base( base_vtable const & vtable ) noexcept { BOOST_ASSUME( &vtable == p_vtable_ ); }
+    struct no_eh_state_construction_trick_tag {};
+    template <typename Constructor, typename ... Args>
+    callable_base( no_eh_state_construction_trick_tag, Constructor const constructor, Args && ... args ) noexcept( noexcept( constructor( std::declval<callable_base &>(), std::forward<Args>( args )... ) ) )
+    {
+        auto const & vtable( constructor( *this, std::forward<Args>( args )... ) );
+        BOOST_ASSUME( p_vtable_ == &vtable );
+        ignore_unused( vtable );
+    }
 
 	~callable_base() noexcept { destroy(); }
 
@@ -907,7 +912,7 @@ protected:
 		if ( direct )
 		{
 			BOOST_ASSERT( &static_cast<callable_base const &>( f ) != this );
-			BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable || /*just being constructed/inside no_eh_state_construction_trick() in a debug build:*/ this->p_vtable_ == nullptr );
+			BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable || /*just being constructed/inside a no_eh_state_construction_trick constructor in a debug build:*/ this->p_vtable_ == nullptr );
 			assign_functionoid_direct( std::forward<FunctionObj>( f ), empty_handler_vtable );
 		}
 		else if ( &static_cast<callable_base const &>( f ) != this )
@@ -939,7 +944,7 @@ protected:
 	{
 		using functor_manager = functor_manager<F, Allocator, buffer>;
 		this->destroy();
-		functor_manager::assign( std::forward<F>(f), this->functor_, a );
+		functor_manager::assign( std::forward<F>( f ), this->functor_, a );
 		this->p_vtable_ = &functor_vtable;
 	}
 
@@ -1086,7 +1091,7 @@ public:
 		if ( this->p_function_to_restore_to_ )
 		{
 			cleaner<EmptyHandler> guard( *this->p_function_to_restore_to_, this->empty_handler_vtable_ );
-			move( this->empty_function_to_move_to_, *this->p_function_to_restore_to_, this->empty_handler_vtable_ );
+			this->move( this->empty_function_to_move_to_, *this->p_function_to_restore_to_, this->empty_handler_vtable_ );
 			guard.cancel();
 		}
 	}
@@ -1130,10 +1135,10 @@ void callable_base<Traits>::assign
 	if ( direct )
 	{
         // Implementation note:
-        //   See the note for the no_eh_state_construction_trick() helper in
-        // function_template.hpp as to why a null vtable is allowed and
-        // expected here.
-        //                                (02.11.2010.) (Domagoj Saric)
+        //   See the note for the no_eh_state_constructor helper in
+        // functionoid.hpp as to why a null vtable is allowed and expected
+        // here.
+        //                                    (02.11.2010.) (Domagoj Saric)
 		BOOST_ASSERT( this->p_vtable_ == nullptr );
 		using functor_manager = functor_manager<F, Allocator, buffer>;
 		functor_manager::assign( std::forward<F>( f ), this->functor_, a );
@@ -1150,10 +1155,7 @@ void callable_base<Traits>::assign
         <
             bool,
 			functor_traits<F, buffer>::allowsSmallObjectOptimization &&
-			(
-				std::is_nothrow_copy_constructible<F>::value ||
-				std::is_trivially_copy_constructible<F>::value
-			)
+            std::is_nothrow_assignable<std::remove_reference_t<F>, F>::value
 		>;
 
 		actual_assign<EmptyHandler>
