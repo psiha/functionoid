@@ -754,6 +754,11 @@ T get_default_value( std::true_type /*a reference type*/ )
 ////////////////////////////////////////////////////////////////////////////
 struct callable_tag {};
 
+#ifdef BOOST_MSVC
+#    pragma warning( push )
+#    pragma warning( disable : 4324 ) // Structure was padded due to alignment specifier.
+#endif // BOOST_MSVC
+
 template <typename Traits>
 class callable_base : public callable_tag
 {
@@ -1003,6 +1008,10 @@ private:
 			base_vtable const * p_vtable_;
 	mutable buffer              functor_ ;
 }; // class function_base
+
+#ifdef BOOST_MSVC
+#    pragma warning( pop )
+#endif // BOOST_MSVC
 
 template <typename T>
 BOOST_FORCEINLINE bool has_empty_target( T * const funcPtr, function_ptr_tag ) { return funcPtr == 0; }
