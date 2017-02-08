@@ -53,13 +53,13 @@ public:
     static result_type handle_empty_invoke() { throw_bad_call(); }
 }; // class throw_on_empty
 
-///////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 struct assert_on_empty { template <class result_type> static result_type handle_empty_invoke() noexcept { handle_empty_invoke<void>(); return{}; } };
-template <> void assert_on_empty::handle_empty_invoke<void>() noexcept { BOOST_ASSERT_MSG(false, "Call to empty functionoid!"); }
+template <> inline void assert_on_empty::handle_empty_invoke<void>() noexcept { BOOST_ASSERT_MSG(false, "Call to empty functionoid!"); }
 
-///////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 struct nop_on_empty { template <class result_type> static result_type handle_empty_invoke() noexcept { return {}; } };
-template <> void nop_on_empty::handle_empty_invoke<void>() noexcept {}
+template <> inline void nop_on_empty::handle_empty_invoke<void>() noexcept {}
 
 enum struct support_level : std::uint8_t
 {
