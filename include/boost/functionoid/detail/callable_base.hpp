@@ -691,7 +691,7 @@ struct vtable
     empty_checker<Traits::dll_safe_empty_check>
 {
     template <typename ActualFunctor, typename StoredFunctor, typename Manager>
-    constexpr vtable( Manager const * const manager_type, ActualFunctor const * const actual_functor_type, StoredFunctor const * const stored_functor_type, bool const is_empty_handler ) noexcept
+    constexpr vtable( Manager const * const manager_type, ActualFunctor const *, StoredFunctor const * const stored_functor_type, bool const is_empty_handler ) noexcept
         :
         Invoker                                    ( manager_type, stored_functor_type ),
         destroyer    <Traits::destructor          >( manager_type ),
