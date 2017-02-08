@@ -18,10 +18,9 @@
 
 #include "detail/callable_base.hpp"
 #include "functionoid_fwd.hpp"
+#include "policies.hpp"
 
 #include <boost/assert.hpp>
-
-#include "policies.hpp"
 
 #include <cstdint>
 #include <type_traits>
