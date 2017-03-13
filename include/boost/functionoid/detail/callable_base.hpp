@@ -28,6 +28,7 @@
 #include <boost/function_equal.hpp>
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <type_traits>
 //------------------------------------------------------------------------------
@@ -168,7 +169,10 @@ struct functor_traits
 }; // struct functor_traits
 
 #if !defined( NDEBUG ) || defined( BOOST_ENABLE_ASSERT_HANDLER )
-template <typename T> void debug_clear( T & target ) { std::memset( std::addressof( target ), 0, sizeof( target ) ); }
+/// \note The cast to void is a workaround to silence the Clang warning with
+/// polymorhpic Ts that we are stomping over a vtable.
+///                                           (13.03.2017.) (Domagoj Saric)
+template <typename T> void debug_clear( T & target ) { std::memset( static_cast<void *>( std::addressof( target ) ), -1, sizeof( target ) ); }
 #else
 template <typename T> void debug_clear( T & ) {}
 #endif // _DEBUG
@@ -324,8 +328,8 @@ struct manager_small
 
     static void BOOST_CC_FASTCALL clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer ) noexcept( std::is_nothrow_copy_constructible<Functor>::value )
     {
-        Functor const & in_functor( *functor_ptr( in_buffer ) );
-        assign( Buffer::from_base( in_functor ), Buffer::from_base( out_buffer ), dummy_allocator() );
+        auto const & __restrict in_functor( *functor_ptr( in_buffer ) );
+        assign( in_functor, Buffer::from_base( out_buffer ), dummy_allocator() );
     }
 
     static void BOOST_CC_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept( std::is_nothrow_move_constructible<Functor>::value )
