@@ -173,6 +173,7 @@ struct functor_traits
 /// polymorhpic Ts that we are stomping over a vtable.
 ///                                           (13.03.2017.) (Domagoj Saric)
 template <typename T> void debug_clear( T & target ) { std::memset( static_cast<void *>( std::addressof( target ) ), -1, sizeof( target ) ); }
+auto const invalid_ptr( reinterpret_cast<void const *>( static_cast<std::ptrdiff_t>( -1 ) ) );
 #else
 template <typename T> void debug_clear( T & ) {}
 #endif // _DEBUG
@@ -921,7 +922,7 @@ protected:
 		if ( direct )
 		{
 			BOOST_ASSERT( &static_cast<callable_base const &>( f ) != this );
-			BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable || /*just being constructed/inside a no_eh_state_construction_trick constructor in a debug build:*/ this->p_vtable_ == nullptr );
+			BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable || /*just being constructed/inside a no_eh_state_construction_trick constructor in a debug build:*/ this->p_vtable_ == invalid_ptr );
 			assign_functionoid_direct( std::forward<FunctionObj>( f ), empty_handler_vtable );
 		}
 		else if ( &static_cast<callable_base const &>( f ) != this )
@@ -1152,7 +1153,7 @@ void callable_base<Traits>::assign
         // functionoid.hpp as to why a null vtable is allowed and expected
         // here.
         //                                    (02.11.2010.) (Domagoj Saric)
-		BOOST_ASSERT( this->p_vtable_ == nullptr );
+        BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable || /*just being constructed/inside a no_eh_state_construction_trick constructor in a debug build:*/ this->p_vtable_ == invalid_ptr );
 		using functor_manager = functor_manager<F, Allocator, buffer>;
 		functor_manager::assign( std::forward<F>( f ), this->functor_, a );
 		this->p_vtable_ = &functor_vtable;
