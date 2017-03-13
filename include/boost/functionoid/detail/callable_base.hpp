@@ -1042,7 +1042,7 @@ BOOST_FORCEINLINE bool has_empty_target( std::reference_wrapper<FunctionObj> con
     // We save/assign a reference to a boost::function even if it is
     // empty and let the referenced function handle a possible empty
     // invocation.
-    //                                    (28.10.2010.) (Domagoj Saric)
+    //                                        (28.10.2010.) (Domagoj Saric)
     return std::is_base_of<callable_tag, FunctionObj>::value
         ? false
         : has_empty_target( f.get(), function_obj_tag() );
