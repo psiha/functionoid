@@ -854,9 +854,8 @@ protected:
     template <typename Constructor, typename ... Args>
     callable_base( no_eh_state_construction_trick_tag, Constructor const constructor, Args && ... args ) noexcept( noexcept( constructor( std::declval<callable_base &>(), std::forward<Args>( args )... ) ) )
     {
-        auto const & vtable( constructor( *this, std::forward<Args>( args )... ) );
+		[[maybe_unused]] auto const & vtable( constructor( *this, std::forward<Args>( args )... ) );
         BOOST_ASSUME( p_vtable_ == &vtable );
-        ignore_unused( vtable );
     }
 
 	~callable_base() noexcept { destroy(); }
@@ -1019,29 +1018,28 @@ private:
 #endif // BOOST_MSVC
 
 template <typename T>
-BOOST_FORCEINLINE bool has_empty_target( T * const funcPtr, function_ptr_tag ) { return funcPtr == 0; }
+BOOST_FORCEINLINE bool has_empty_target( T * const funcPtr, function_ptr_tag ) noexcept { return funcPtr == 0; }
 
 template <typename T>
-BOOST_FORCEINLINE bool has_empty_target_aux( T * const funcPtr, member_ptr_tag ) { return has_empty_target<T>( funcPtr, function_ptr_tag() ); }
+BOOST_FORCEINLINE bool has_empty_target_aux( T * const funcPtr, member_ptr_tag ) noexcept { return has_empty_target<T>( funcPtr, function_ptr_tag() ); }
 
 template <class Traits>
-BOOST_FORCEINLINE bool has_empty_target_aux( callable_base<Traits> const * const f, function_obj_tag ) { BOOST_ASSUME( f != nullptr ); return f->empty(); }
+BOOST_FORCEINLINE bool has_empty_target_aux( callable_base<Traits> const * const f, function_obj_tag ) noexcept { BOOST_ASSUME( f != nullptr ); return f->empty(); }
 
 // Some compilers seem unable to inline even trivial vararg functions
 // (e.g. MSVC).
 //inline bool has_empty_target_aux(...)
-BOOST_FORCEINLINE bool has_empty_target_aux( void const * /*f*/, function_obj_tag ) { return false; }
+constexpr bool has_empty_target_aux( void const * /*f*/, function_obj_tag ) noexcept { return false; }
 
 template <typename T>
-BOOST_FORCEINLINE bool has_empty_target( T const & f, function_obj_tag ) { return has_empty_target_aux( std::addressof( f ), function_obj_tag() ); }
+BOOST_FORCEINLINE bool has_empty_target( T const & f, function_obj_tag ) noexcept { return has_empty_target_aux( std::addressof( f ), function_obj_tag() ); }
 
 template <class FunctionObj>
-BOOST_FORCEINLINE bool has_empty_target( std::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag )
+BOOST_FORCEINLINE bool has_empty_target( std::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag ) noexcept
 {
     // Implementation note:
-    // We save/assign a reference to a boost::function even if it is
-    // empty and let the referenced function handle a possible empty
-    // invocation.
+    // We save/assign a reference to a functionoid even if it is empty and let
+    // the referenced functionoid handle a possible empty invocation.
     //                                        (28.10.2010.) (Domagoj Saric)
     return std::is_base_of<callable_tag, FunctionObj>::value
         ? false
@@ -1049,7 +1047,7 @@ BOOST_FORCEINLINE bool has_empty_target( std::reference_wrapper<FunctionObj> con
 }
 
 template <class FunctionObj>
-BOOST_FORCEINLINE bool has_empty_target( boost::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag )
+BOOST_FORCEINLINE bool has_empty_target( boost::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag ) noexcept
 {
     return has_empty_target( std::cref( f.get() ), function_obj_ref_tag() );
 }
