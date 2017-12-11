@@ -502,8 +502,8 @@ using functor_manager = typename functor_manager_aux
     functor_traits<StoredFunctor, Buffer>::hasDefaultAlignement
 >::type;
 
-/// \note MSVC (14 update 3 and 14.1 preview 5) ICE on function pointers
-/// with conditional noexcept specifiers in a template context.
+/// \note MSVC (14.1u5) ICEs on function pointers with conditional noexcept
+/// specifiers in a template context.
 /// https://connect.microsoft.com/VisualStudio/feedback/details/3105692/ice-w-noexcept-function-pointer-in-a-template-context
 /// Additionally this compiler generates bad binaries if function references
 /// are used (instead of const pointers) by generating/storing 'null
@@ -538,9 +538,9 @@ struct invoker
 		// a plain void * in case of the trivial managers. In case of the
 		// trivial ptr manager it is even a void * * so a double static_cast
 		// (or a reinterpret_cast) is necessary.
-		auto & __restrict functionObject
+        auto * __restrict const p_function_object // MSVC 14.1u5 broke restricted references
 		(
-			*static_cast<FunctionObj *>
+			static_cast<FunctionObj *>
 			(
 				static_cast<void *>
 				(
@@ -548,8 +548,8 @@ struct invoker
 				)
 			)
 		);
-        static_assert( noexcept( functionObject( args... ) ) >= is_noexcept, "Trying to assign a not-noexcept function object to a noexcept functionoid." );
-		return functionObject( args... );
+        static_assert( noexcept( (*p_function_object)( args... ) ) >= is_noexcept, "Trying to assign a not-noexcept function object to a noexcept functionoid." );
+		return (*p_function_object)( args... );
 	}
 }; // invoker
 
@@ -638,8 +638,9 @@ struct invoker<true, ReturnType, InvokerArguments...>
     template <typename FunctionObjManager, typename FunctionObj>
 	static ReturnType BOOST_CC_FASTCALL invoke_impl( detail::function_buffer_base & buffer, InvokerArguments... args ) noexcept
 	{
-		auto & __restrict functionObject( *static_cast<FunctionObj *>( static_cast<void *>( FunctionObjManager::functor_ptr( buffer ) ) ) );
-		return functionObject( args... );
+        // MSVC 14.1u5 broke restricted references
+		auto * __restrict const p_function_object( static_cast<FunctionObj *>( static_cast<void *>( FunctionObjManager::functor_ptr( buffer ) ) ) );
+		return (*p_function_object)( args... );
 	}
 };
 template <>
