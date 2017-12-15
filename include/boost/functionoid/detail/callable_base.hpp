@@ -5,7 +5,7 @@
 /// \file callable_base.hpp
 /// -----------------------
 ///
-///  Copyright (c) Domagoj Saric 2010 - 2016
+///  Copyright (c) Domagoj Saric 2010 - 2017
 ///
 ///  Use, modification and distribution is subject to the Boost Software
 ///  License, Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
@@ -92,9 +92,9 @@ union alignas( Alignment ) function_buffer
 
 // Check that all function_buffer "access points" are actually at the same
 // address/offset.
-static_assert( offsetof( function_buffer_base, obj_ptr           ) == offsetof( function_buffer_base, func_ptr ), "" );
-static_assert( offsetof( function_buffer_base, bound_memfunc_ptr ) == offsetof( function_buffer_base, func_ptr ), "" );
-static_assert( offsetof( function_buffer_base::bound_memfunc_ptr_t, memfunc_ptr ) == 0, "" );
+static_assert( offsetof( function_buffer_base, obj_ptr           ) == offsetof( function_buffer_base, func_ptr ) );
+static_assert( offsetof( function_buffer_base, bound_memfunc_ptr ) == offsetof( function_buffer_base, func_ptr ) );
+static_assert( offsetof( function_buffer_base::bound_memfunc_ptr_t, memfunc_ptr ) == 0 );
 
 // Tags used to decide between different types of functions
 struct function_ptr_tag     {};
@@ -187,7 +187,7 @@ struct manager_ptr
     template <typename Functor, typename Allocator>
     static void assign( Functor const functor, function_buffer_base & out_buffer, Allocator ) noexcept
     {
-        static_assert( functor_traits<Functor, function_buffer_base>::allowsPtrObjectOptimization, "" );
+        static_assert( functor_traits<Functor, function_buffer_base>::allowsPtrObjectOptimization );
 #   ifdef _MSC_VER
         // MSVC14u3 still generates a branch w/o this (GCC issues a warning that it knows that &out_buffer cannot be null so we have to ifdef guard this).
         BOOST_ASSUME( &out_buffer );
@@ -226,7 +226,7 @@ struct manager_trivial_small
         static_assert
         (
 			functor_traits<Functor, Buffer>::allowsPODOptimization &&
-			functor_traits<Functor, Buffer>::allowsSmallObjectOptimization, ""
+			functor_traits<Functor, Buffer>::allowsSmallObjectOptimization
         );
 #   ifdef _MSC_VER
         // MSVC14u3 still generates a branch w/o this (GCC issues a warning that it knows that &out_buffer cannot be null so we have to ifdef guard this).
@@ -273,7 +273,7 @@ public:
         static_assert
         (
 			functor_traits<Functor, function_buffer_base>::allowsPODOptimization &&
-			functor_traits<Functor, function_buffer_base>::hasDefaultAlignement, ""
+			functor_traits<Functor, function_buffer_base>::hasDefaultAlignement
         );
 
         function_buffer_base in_buffer;
@@ -818,7 +818,7 @@ private: // Private helper guard classes.
 				static_assert
 				(
 					empty_handler_traits::allowsPODOptimization &&
-					empty_handler_traits::allowsSmallObjectOptimization, ""
+					empty_handler_traits::allowsSmallObjectOptimization
 				);
 				empty_handler_manager::assign( EmptyHandler(), p_function_->functor_, std::allocator<EmptyHandler>() );
 				p_function_->p_vtable_ = &empty_handler_vtable_;
