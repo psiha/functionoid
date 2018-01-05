@@ -1001,9 +1001,21 @@ private: // Assignment from another functionoid helpers.
 		guard.cancel();
 	}
 
-	void destroy() noexcept { get_vtable().destroy( this->functor_ ); }
+	void destroy() noexcept 
+    #ifdef __clang__
+        __attribute__(( no_sanitize( "function" ) ))
+    #endif
+    { 
+        get_vtable().destroy( this->functor_ ); 
+    }
 
-    void move_to( callable_base & destination, std::true_type  /*    has move*/ ) const noexcept( Traits::moveable >= support_level::nofail ) { get_vtable().move ( std::move( this->functor_ ), destination.functor_ ); }
+    void move_to( callable_base & destination, std::true_type  /*    has move*/ ) const noexcept( Traits::moveable >= support_level::nofail ) 
+    #ifdef __clang__
+        __attribute__(( no_sanitize( "function" ) ))
+    #endif
+    { 
+        get_vtable().move ( std::move( this->functor_ ), destination.functor_ ); 
+    }
     void move_to( callable_base & destination, std::false_type /*not has move*/ ) const noexcept( Traits::copyable >= support_level::nofail ) { get_vtable().clone( std::move( this->functor_ ), destination.functor_ ); }
 
 private:
