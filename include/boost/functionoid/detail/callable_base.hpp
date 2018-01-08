@@ -775,7 +775,14 @@ public:
         return get_vtable().get_typed_functor( this->functor_ ).functor_type_info();
     }
 
-    template <typename Functor> Functor       * target()       noexcept { return get_vtable().get_typed_functor( this->functor_ ). template target<Functor>(); }
+    template <typename Functor> Functor       * target()       noexcept
+#ifdef __clang__
+    __attribute__(( no_sanitize( "function" ) ))
+#endif
+    {
+        return get_vtable().get_typed_functor( this->functor_ ). template target<Functor>();
+    }
+
     template <typename Functor> Functor const * target() const noexcept { return const_cast<callable_base &>( *this ).target<Functor const>(); }
 
     template <typename F>
@@ -980,6 +987,9 @@ protected:
 
 private: // Assignment from another functionoid helpers.
 	void assign_functionoid_direct( callable_base const & source, base_vtable const & /*empty_handler_vtable*/ ) noexcept( Traits::copyable >= support_level::nofail )
+#ifdef __clang__
+    __attribute__(( no_sanitize( "function" ) ))
+#endif
 	{
 		source.get_vtable().clone( source.functor_, this->functor_ );
 		p_vtable_ = &source.get_vtable();
@@ -1016,7 +1026,13 @@ private: // Assignment from another functionoid helpers.
     { 
         get_vtable().move ( std::move( this->functor_ ), destination.functor_ ); 
     }
-    void move_to( callable_base & destination, std::false_type /*not has move*/ ) const noexcept( Traits::copyable >= support_level::nofail ) { get_vtable().clone( std::move( this->functor_ ), destination.functor_ ); }
+    void move_to( callable_base & destination, std::false_type /*not has move*/ ) const noexcept( Traits::copyable >= support_level::nofail )
+#ifdef __clang__
+    __attribute__(( no_sanitize( "function" ) ))
+#endif
+    {
+        get_vtable().clone( std::move( this->functor_ ), destination.functor_ );
+    }
 
 private:
 	class safe_mover_base;
