@@ -5,7 +5,7 @@
 /// \file policies.hpp
 /// ------------------
 ///
-///  Copyright (c) Domagoj Saric 2010 - 2016
+///  Copyright (c) Domagoj Saric 2010 - 2017
 ///
 ///  Use, modification and distribution is subject to the Boost Software
 ///  License, Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
@@ -37,7 +37,7 @@ namespace functionoid
 class bad_function_call : public std::runtime_error
 {
 public:
-  bad_function_call() : std::runtime_error( "call to empty boost::functionoid" ) {}
+    bad_function_call() : std::runtime_error( "call to empty boost::functionoid" ) {}
 };
 
 class throw_on_empty
@@ -54,8 +54,19 @@ public:
 }; // class throw_on_empty
 
 ////////////////////////////////////////////////////////////////////////////////
+#ifdef BOOST_MSVC
+/// \note In optimized builds with enabled asserts MSVC detects that the assert
+/// handler never returns and so it issues this warning about the "return{};"
+/// statement.
+///                                           (02.01.2018.) (Domagoj Saric)
+#pragma warning( push )
+#pragma warning( disable : 4702 ) // unreachable code
+#endif // BOOST_MSVC
 struct assert_on_empty { template <class result_type> static result_type handle_empty_invoke() noexcept { handle_empty_invoke<void>(); return{}; } };
-template <> inline void assert_on_empty::handle_empty_invoke<void>() noexcept { BOOST_ASSERT_MSG(false, "Call to empty functionoid!"); }
+template <> inline void assert_on_empty::handle_empty_invoke<void>() noexcept { BOOST_ASSERT_MSG( false, "Call to empty functionoid!" ); }
+#ifdef BOOST_MSVC
+#pragma warning( pop )
+#endif // BOOST_MSVC
 
 ////////////////////////////////////////////////////////////////////////////////
 struct nop_on_empty { template <class result_type> static result_type handle_empty_invoke() noexcept { return {}; } };

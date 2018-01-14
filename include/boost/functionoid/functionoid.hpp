@@ -183,7 +183,7 @@ private:
     template <typename Allocator, typename ActualFunctor>
     static vtable_type const & vtable_for_functor_aux( std::true_type /*is a callable*/, callable const & functor )
     {
-        static_assert( std::is_base_of<callable, typename std::remove_reference<ActualFunctor>::type>::value, "" );
+        static_assert( std::is_base_of<callable, typename std::remove_reference<ActualFunctor>::type>::value );
         return functor.vtable();
     }
 
@@ -213,7 +213,7 @@ private:
         (
             std::is_same<ActualFunctor, empty_handler>::value
                 ==
-            std::is_same<StoredFunctor, my_empty_handler>::value, ""
+            std::is_same<StoredFunctor, my_empty_handler>::value
         );
 
         using invoker_type = invoker<Traits::is_noexcept, ReturnType, Arguments...>;
@@ -291,7 +291,7 @@ private:
     {
         static_assert
         (
-            Traits::copyable != support_level::na || std::is_copy_constructible<StoredFunctor>::value,
+            Traits::copyable == support_level::na || std::is_copy_constructible<StoredFunctor>::value,
             "This callable instantiation requires copyable function objects."
         );
 

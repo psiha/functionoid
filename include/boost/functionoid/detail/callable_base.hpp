@@ -5,7 +5,7 @@
 /// \file callable_base.hpp
 /// -----------------------
 ///
-///  Copyright (c) Domagoj Saric 2010 - 2016
+///  Copyright (c) Domagoj Saric 2010 - 2017
 ///
 ///  Use, modification and distribution is subject to the Boost Software
 ///  License, Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
@@ -28,6 +28,7 @@
 #include <boost/function_equal.hpp>
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <type_traits>
 //------------------------------------------------------------------------------
@@ -91,9 +92,9 @@ union alignas( Alignment ) function_buffer
 
 // Check that all function_buffer "access points" are actually at the same
 // address/offset.
-static_assert( offsetof( function_buffer_base, obj_ptr           ) == offsetof( function_buffer_base, func_ptr ), "" );
-static_assert( offsetof( function_buffer_base, bound_memfunc_ptr ) == offsetof( function_buffer_base, func_ptr ), "" );
-static_assert( offsetof( function_buffer_base::bound_memfunc_ptr_t, memfunc_ptr ) == 0, "" );
+static_assert( offsetof( function_buffer_base, obj_ptr           ) == offsetof( function_buffer_base, func_ptr ) );
+static_assert( offsetof( function_buffer_base, bound_memfunc_ptr ) == offsetof( function_buffer_base, func_ptr ) );
+static_assert( offsetof( function_buffer_base::bound_memfunc_ptr_t, memfunc_ptr ) == 0 );
 
 // Tags used to decide between different types of functions
 struct function_ptr_tag     {};
@@ -168,7 +169,11 @@ struct functor_traits
 }; // struct functor_traits
 
 #if !defined( NDEBUG ) || defined( BOOST_ENABLE_ASSERT_HANDLER )
-template <typename T> void debug_clear( T & target ) { std::memset( std::addressof( target ), 0, sizeof( target ) ); }
+/// \note The cast to void is a workaround to silence the Clang warning with
+/// polymorhpic Ts that we are stomping over a vtable.
+///                                           (13.03.2017.) (Domagoj Saric)
+template <typename T> void debug_clear( T & target ) { std::memset( static_cast<void *>( std::addressof( target ) ), -1, sizeof( target ) ); }
+auto const invalid_ptr( reinterpret_cast<void const *>( static_cast<std::ptrdiff_t>( -1 ) ) );
 #else
 template <typename T> void debug_clear( T & ) {}
 #endif // _DEBUG
@@ -182,7 +187,7 @@ struct manager_ptr
     template <typename Functor, typename Allocator>
     static void assign( Functor const functor, function_buffer_base & out_buffer, Allocator ) noexcept
     {
-        static_assert( functor_traits<Functor, function_buffer_base>::allowsPtrObjectOptimization, "" );
+        static_assert( functor_traits<Functor, function_buffer_base>::allowsPtrObjectOptimization );
 #   ifdef _MSC_VER
         // MSVC14u3 still generates a branch w/o this (GCC issues a warning that it knows that &out_buffer cannot be null so we have to ifdef guard this).
         BOOST_ASSUME( &out_buffer );
@@ -221,7 +226,7 @@ struct manager_trivial_small
         static_assert
         (
 			functor_traits<Functor, Buffer>::allowsPODOptimization &&
-			functor_traits<Functor, Buffer>::allowsSmallObjectOptimization, ""
+			functor_traits<Functor, Buffer>::allowsSmallObjectOptimization
         );
 #   ifdef _MSC_VER
         // MSVC14u3 still generates a branch w/o this (GCC issues a warning that it knows that &out_buffer cannot be null so we have to ifdef guard this).
@@ -268,7 +273,7 @@ public:
         static_assert
         (
 			functor_traits<Functor, function_buffer_base>::allowsPODOptimization &&
-			functor_traits<Functor, function_buffer_base>::hasDefaultAlignement, ""
+			functor_traits<Functor, function_buffer_base>::hasDefaultAlignement
         );
 
         function_buffer_base in_buffer;
@@ -324,8 +329,8 @@ struct manager_small
 
     static void BOOST_CC_FASTCALL clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer ) noexcept( std::is_nothrow_copy_constructible<Functor>::value )
     {
-        Functor const & in_functor( *functor_ptr( in_buffer ) );
-        assign( Buffer::from_base( in_functor ), Buffer::from_base( out_buffer ), dummy_allocator() );
+        auto const & __restrict in_functor( *functor_ptr( in_buffer ) );
+        assign( in_functor, Buffer::from_base( out_buffer ), dummy_allocator() );
     }
 
     static void BOOST_CC_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept( std::is_nothrow_move_constructible<Functor>::value )
@@ -497,14 +502,14 @@ using functor_manager = typename functor_manager_aux
     functor_traits<StoredFunctor, Buffer>::hasDefaultAlignement
 >::type;
 
-/// \note MSVC (14 update 3 and 14.1 preview 5) ICE on function pointers
-/// with conditional noexcept specifiers in a template context.
+/// \note MSVC (14.1u5) ICEs on function pointers with conditional noexcept
+/// specifiers in a template context.
 /// https://connect.microsoft.com/VisualStudio/feedback/details/3105692/ice-w-noexcept-function-pointer-in-a-template-context
 /// Additionally this compiler generates bad binaries if function references
 /// are used (instead of const pointers) by generating/storing 'null
 /// references'.
 ///                                       (14.10.2016.) (Domagoj Saric)
-#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) )
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) ) || ( defined( __clang__ ) && __clang_major__ >= 4 && __clang_major__ != 8 )
 #define BOOST_AUX_NOEXCEPT_PTR( condition )
 #else
 #define BOOST_AUX_NOEXCEPT_PTR( condition ) noexcept( condition )
@@ -533,9 +538,9 @@ struct invoker
 		// a plain void * in case of the trivial managers. In case of the
 		// trivial ptr manager it is even a void * * so a double static_cast
 		// (or a reinterpret_cast) is necessary.
-		auto & __restrict functionObject
+        auto * __restrict const p_function_object // MSVC 14.1u5 broke restricted references
 		(
-			*static_cast<FunctionObj *>
+			static_cast<FunctionObj *>
 			(
 				static_cast<void *>
 				(
@@ -543,8 +548,8 @@ struct invoker
 				)
 			)
 		);
-        static_assert( noexcept( functionObject( args... ) ) >= is_noexcept, "Trying to assign a not-noexcept function object to a noexcept functionoid." );
-		return functionObject( args... );
+        static_assert( noexcept( (*p_function_object)( args... ) ) >= is_noexcept, "Trying to assign a not-noexcept function object to a noexcept functionoid." );
+		return (*p_function_object)( args... );
 	}
 }; // invoker
 
@@ -633,8 +638,9 @@ struct invoker<true, ReturnType, InvokerArguments...>
     template <typename FunctionObjManager, typename FunctionObj>
 	static ReturnType BOOST_CC_FASTCALL invoke_impl( detail::function_buffer_base & buffer, InvokerArguments... args ) noexcept
 	{
-		auto & __restrict functionObject( *static_cast<FunctionObj *>( static_cast<void *>( FunctionObjManager::functor_ptr( buffer ) ) ) );
-		return functionObject( args... );
+        // MSVC 14.1u5 broke restricted references
+		auto * __restrict const p_function_object( static_cast<FunctionObj *>( static_cast<void *>( FunctionObjManager::functor_ptr( buffer ) ) ) );
+		return (*p_function_object)( args... );
 	}
 };
 template <>
@@ -769,7 +775,14 @@ public:
         return get_vtable().get_typed_functor( this->functor_ ).functor_type_info();
     }
 
-    template <typename Functor> Functor       * target()       noexcept { return get_vtable().get_typed_functor( this->functor_ ). template target<Functor>(); }
+    template <typename Functor> Functor       * target()       noexcept
+#ifdef __clang__
+    __attribute__(( no_sanitize( "function" ) ))
+#endif
+    {
+        return get_vtable().get_typed_functor( this->functor_ ). template target<Functor>();
+    }
+
     template <typename Functor> Functor const * target() const noexcept { return const_cast<callable_base &>( *this ).target<Functor const>(); }
 
     template <typename F>
@@ -812,7 +825,7 @@ private: // Private helper guard classes.
 				static_assert
 				(
 					empty_handler_traits::allowsPODOptimization &&
-					empty_handler_traits::allowsSmallObjectOptimization, ""
+					empty_handler_traits::allowsSmallObjectOptimization
 				);
 				empty_handler_manager::assign( EmptyHandler(), p_function_->functor_, std::allocator<EmptyHandler>() );
 				p_function_->p_vtable_ = &empty_handler_vtable_;
@@ -849,9 +862,8 @@ protected:
     template <typename Constructor, typename ... Args>
     callable_base( no_eh_state_construction_trick_tag, Constructor const constructor, Args && ... args ) noexcept( noexcept( constructor( std::declval<callable_base &>(), std::forward<Args>( args )... ) ) )
     {
-        auto const & vtable( constructor( *this, std::forward<Args>( args )... ) );
+		[[maybe_unused]] auto const & vtable( constructor( *this, std::forward<Args>( args )... ) );
         BOOST_ASSUME( p_vtable_ == &vtable );
-        ignore_unused( vtable );
     }
 
 	~callable_base() noexcept { destroy(); }
@@ -917,7 +929,7 @@ protected:
 		if ( direct )
 		{
 			BOOST_ASSERT( &static_cast<callable_base const &>( f ) != this );
-			BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable || /*just being constructed/inside a no_eh_state_construction_trick constructor in a debug build:*/ this->p_vtable_ == nullptr );
+			BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable || /*just being constructed/inside a no_eh_state_construction_trick constructor in a debug build:*/ this->p_vtable_ == invalid_ptr );
 			assign_functionoid_direct( std::forward<FunctionObj>( f ), empty_handler_vtable );
 		}
 		else if ( &static_cast<callable_base const &>( f ) != this )
@@ -975,6 +987,9 @@ protected:
 
 private: // Assignment from another functionoid helpers.
 	void assign_functionoid_direct( callable_base const & source, base_vtable const & /*empty_handler_vtable*/ ) noexcept( Traits::copyable >= support_level::nofail )
+#ifdef __clang__
+    __attribute__(( no_sanitize( "function" ) ))
+#endif
 	{
 		source.get_vtable().clone( source.functor_, this->functor_ );
 		p_vtable_ = &source.get_vtable();
@@ -996,10 +1011,28 @@ private: // Assignment from another functionoid helpers.
 		guard.cancel();
 	}
 
-	void destroy() noexcept { get_vtable().destroy( this->functor_ ); }
+	void destroy() noexcept 
+    #ifdef __clang__
+        __attribute__(( no_sanitize( "function" ) ))
+    #endif
+    { 
+        get_vtable().destroy( this->functor_ ); 
+    }
 
-    void move_to( callable_base & destination, std::true_type  /*    has move*/ ) const noexcept( Traits::moveable >= support_level::nofail ) { get_vtable().move ( std::move( this->functor_ ), destination.functor_ ); }
-    void move_to( callable_base & destination, std::false_type /*not has move*/ ) const noexcept( Traits::copyable >= support_level::nofail ) { get_vtable().clone( std::move( this->functor_ ), destination.functor_ ); }
+    void move_to( callable_base & destination, std::true_type  /*    has move*/ ) const noexcept( Traits::moveable >= support_level::nofail ) 
+    #ifdef __clang__
+        __attribute__(( no_sanitize( "function" ) ))
+    #endif
+    { 
+        get_vtable().move ( std::move( this->functor_ ), destination.functor_ ); 
+    }
+    void move_to( callable_base & destination, std::false_type /*not has move*/ ) const noexcept( Traits::copyable >= support_level::nofail )
+#ifdef __clang__
+    __attribute__(( no_sanitize( "function" ) ))
+#endif
+    {
+        get_vtable().clone( std::move( this->functor_ ), destination.functor_ );
+    }
 
 private:
 	class safe_mover_base;
@@ -1014,37 +1047,36 @@ private:
 #endif // BOOST_MSVC
 
 template <typename T>
-BOOST_FORCEINLINE bool has_empty_target( T * const funcPtr, function_ptr_tag ) { return funcPtr == 0; }
+BOOST_FORCEINLINE bool has_empty_target( T * const funcPtr, function_ptr_tag ) noexcept { return funcPtr == 0; }
 
 template <typename T>
-BOOST_FORCEINLINE bool has_empty_target_aux( T * const funcPtr, member_ptr_tag ) { return has_empty_target<T>( funcPtr, function_ptr_tag() ); }
+BOOST_FORCEINLINE bool has_empty_target_aux( T * const funcPtr, member_ptr_tag ) noexcept { return has_empty_target<T>( funcPtr, function_ptr_tag() ); }
 
 template <class Traits>
-BOOST_FORCEINLINE bool has_empty_target_aux( callable_base<Traits> const * const f, function_obj_tag ) { BOOST_ASSUME( f != nullptr ); return f->empty(); }
+BOOST_FORCEINLINE bool has_empty_target_aux( callable_base<Traits> const * const f, function_obj_tag ) noexcept { BOOST_ASSUME( f != nullptr ); return f->empty(); }
 
 // Some compilers seem unable to inline even trivial vararg functions
 // (e.g. MSVC).
 //inline bool has_empty_target_aux(...)
-BOOST_FORCEINLINE bool has_empty_target_aux( void const * /*f*/, function_obj_tag ) { return false; }
+constexpr bool has_empty_target_aux( void const * /*f*/, function_obj_tag ) noexcept { return false; }
 
 template <typename T>
-BOOST_FORCEINLINE bool has_empty_target( T const & f, function_obj_tag ) { return has_empty_target_aux( std::addressof( f ), function_obj_tag() ); }
+BOOST_FORCEINLINE bool has_empty_target( T const & f, function_obj_tag ) noexcept { return has_empty_target_aux( std::addressof( f ), function_obj_tag() ); }
 
 template <class FunctionObj>
-BOOST_FORCEINLINE bool has_empty_target( std::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag )
+BOOST_FORCEINLINE bool has_empty_target( std::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag ) noexcept
 {
     // Implementation note:
-    // We save/assign a reference to a boost::function even if it is
-    // empty and let the referenced function handle a possible empty
-    // invocation.
-    //                                    (28.10.2010.) (Domagoj Saric)
+    // We save/assign a reference to a functionoid even if it is empty and let
+    // the referenced functionoid handle a possible empty invocation.
+    //                                        (28.10.2010.) (Domagoj Saric)
     return std::is_base_of<callable_tag, FunctionObj>::value
         ? false
         : has_empty_target( f.get(), function_obj_tag() );
 }
 
 template <class FunctionObj>
-BOOST_FORCEINLINE bool has_empty_target( boost::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag )
+BOOST_FORCEINLINE bool has_empty_target( boost::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag ) noexcept
 {
     return has_empty_target( std::cref( f.get() ), function_obj_ref_tag() );
 }
@@ -1148,7 +1180,7 @@ void callable_base<Traits>::assign
         // functionoid.hpp as to why a null vtable is allowed and expected
         // here.
         //                                    (02.11.2010.) (Domagoj Saric)
-		BOOST_ASSERT( this->p_vtable_ == nullptr );
+        BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable || /*just being constructed/inside a no_eh_state_construction_trick constructor in a debug build:*/ this->p_vtable_ == invalid_ptr );
 		using functor_manager = functor_manager<F, Allocator, buffer>;
 		functor_manager::assign( std::forward<F>( f ), this->functor_, a );
 		this->p_vtable_ = &functor_vtable;
