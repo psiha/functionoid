@@ -628,7 +628,7 @@ struct empty_checker<false>
 
 /// \note See the above note for BOOST_AUX_NOEXCEPT_PTR.
 ///                                       (14.10.2016.) (Domagoj Saric)
-#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) )
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1903 ) )
 template <typename ReturnType, typename ... InvokerArguments>
 struct invoker<true, ReturnType, InvokerArguments...>
 {
@@ -658,8 +658,9 @@ struct cloner<support_level::nofail>
 template <>
 struct mover<support_level::nofail>
 {
-    template <typename Manager> constexpr mover( Manager const * ) noexcept : move( &Manager::move ) {}
     void (BOOST_CC_FASTCALL * const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept;
+    template <typename Manager> constexpr mover( Manager const * ) noexcept : move( reinterpret_cast<decltype( move )>( &Manager::move ) ) // more MSVC noexcept( <expr> ) brainfarts
+    { static_assert( noexcept( Manager::move( std::declval<function_buffer_base &&>(), std::declval<function_buffer_base &>() ) ) ); }
 };
 #endif // MSVC workaround
 #undef BOOST_AUX_NOEXCEPT_PTR
