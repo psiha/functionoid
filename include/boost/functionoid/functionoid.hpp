@@ -5,7 +5,7 @@
 /// \file functionoid.hpp
 /// ---------------------
 ///
-///  Copyright (c) Domagoj Saric 2010 - 2016
+///  Copyright (c) Domagoj Saric 2010 - 2018
 ///
 ///  Use, modification and distribution is subject to the Boost Software
 ///  License, Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
@@ -48,6 +48,9 @@ public: // Public typedefs/introspection section.
 	using empty_handler = typename Traits::empty_handler;
 
 	static constexpr std::uint8_t arity = sizeof...( Arguments );
+
+    template <typename FunctionObject>
+    static bool constexpr requiresAllocation = !detail::functor_traits<FunctionObject, buffer>::allowsSmallObjectOptimization;
 
 private: // Private implementation types.
     // We need a specific thin wrapper around the base empty handler that will
@@ -120,7 +123,6 @@ private: // Private implementation types.
     using no_eh_state_construction_trick_tag = typename function_base::no_eh_state_construction_trick_tag;
 
 public: // Public function interface.
-
     callable() noexcept : function_base( empty_handler_vtable(), empty_handler() ) {}
 
     template <typename Functor>
@@ -218,11 +220,11 @@ private:
 
         using invoker_type = invoker<Traits::is_noexcept, ReturnType, Arguments...>;
 
-#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) )
+#   if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) )
         return vtable_holder<invoker_type, manager_type, ActualFunctor, StoredFunctor, is_empty_handler, Traits>::stored_vtable;
-#else
+#   else
         // http://stackoverflow.com/questions/24398102/constexpr-and-initialization-of-a-static-const-void-pointer-with-reinterpret-cas
-        // 
+        //
         // Note: it is extremely important that this initialization uses
         // static initialization. Otherwise, we will have a race
         // condition here in multi-threaded code. See
@@ -235,7 +237,7 @@ private:
             is_empty_handler::value
         );
         return the_vtable;
-#endif
+#   endif
     } // vtable_for_functor_aux()
 
     template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
@@ -295,7 +297,7 @@ private:
             "This callable instantiation requires copyable function objects."
         );
 
-		using NakedStoredFunctor = typename std::remove_const<typename std::remove_reference<StoredFunctor>::type>::type;
+		using NakedStoredFunctor     = typename std::remove_const<typename std::remove_reference<StoredFunctor>::type>::type;
         using StoredFunctorAllocator = typename ActualFunctorAllocator:: template rebind<NakedStoredFunctor>::other;
         function_base:: template assign<direct, empty_handler>
         (
