@@ -876,7 +876,11 @@ protected:
     template <typename Constructor, typename ... Args>
     callable_base( no_eh_state_construction_trick_tag, Constructor const constructor, Args && ... args ) noexcept( noexcept( constructor( std::declval<callable_base &>(), std::forward<Args>( args )... ) ) )
     {
-		[[maybe_unused]] auto const & vtable( constructor( *this, std::forward<Args>( args )... ) );
+    #if !BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1914 ) )
+        // workaround for VS 2017 15.7 "'boost::functionoid::detail::vtable': illegal use of this type as an expression" dubious error
+        [[maybe_unused]]
+    #endif
+        auto const & vtable( constructor( *this, std::forward<Args>( args )... ) );
         BOOST_ASSUME( p_vtable_ == &vtable );
     }
 
