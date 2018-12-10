@@ -5,7 +5,7 @@
 /// \file callable_base.hpp
 /// -----------------------
 ///
-///  Copyright (c) Domagoj Saric 2010 - 2017
+///  Copyright (c) Domagoj Saric 2010 - 2018
 ///
 ///  Use, modification and distribution is subject to the Boost Software
 ///  License, Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
@@ -165,7 +165,7 @@ struct functor_traits
 			( sizeof ( void * ) >= sizeof ( Functor )      ) &&
 			( alignof( void * ) %  alignof( Functor ) == 0 );
 
-    static constexpr bool hasDefaultAlignement = alignof( Functor ) <= alignof( std::max_align_t );
+    static constexpr bool hasDefaultAlignement = ( alignof( Functor ) <= alignof( std::max_align_t ) );
 }; // struct functor_traits
 
 #if !defined( NDEBUG ) || defined( BOOST_ENABLE_ASSERT_HANDLER )
@@ -181,6 +181,8 @@ template <typename T> void debug_clear( T & ) {}
 /// Manager for trivial objects that fit into sizeof( void * ).
 struct manager_ptr
 {
+    static bool constexpr trivial_destroy = true;
+
     static auto functor_ptr( function_buffer_base       & buffer ) {                                 return &buffer.obj_ptr; }
     static auto functor_ptr( function_buffer_base const & buffer ) { BOOST_ASSUME( buffer.obj_ptr ); return &buffer.obj_ptr; }
 
@@ -218,6 +220,8 @@ struct manager_ptr
 template <typename Buffer>
 struct manager_trivial_small
 {
+    static bool constexpr trivial_destroy = true;
+
     static void * functor_ptr( function_buffer_base & buffer ) { return &buffer; }
 
     template <typename Functor, typename Allocator>
@@ -261,6 +265,8 @@ private:
     using trivial_allocator = typename Allocator:: template rebind<unsigned char>::other;
 
 public:
+    static bool constexpr trivial_destroy = false;
+
     static void       * functor_ptr( function_buffer_base       & buffer ) { BOOST_ASSUME( buffer.trivial_heap_obj.ptr ); return buffer.trivial_heap_obj.ptr; }
     static void const * functor_ptr( function_buffer_base const & buffer ) { return functor_ptr( const_cast<function_buffer_base &>( buffer ) ); }
 
@@ -314,6 +320,8 @@ struct manager_small
 {
     using Functor = FunctorParam;
 
+    static bool constexpr trivial_destroy = std::is_trivially_destructible_v<Functor>;
+
     static Functor       * functor_ptr( function_buffer_base       & buffer ) { return static_cast<Functor *>( manager_trivial_small<Buffer>::functor_ptr( buffer ) ); }
     static Functor const * functor_ptr( function_buffer_base const & buffer ) { return functor_ptr( const_cast<function_buffer_base &>( buffer ) ); }
 
@@ -354,6 +362,8 @@ template <typename FunctorParam, typename AllocatorParam>
 struct manager_generic
 {
 public:
+    static bool constexpr trivial_destroy = false;
+
 	using Functor           = FunctorParam  ;
 	using OriginalAllocator = AllocatorParam;
 
@@ -732,15 +742,18 @@ struct vtable_holder
     static_assert
     (
         ( Traits::destructor != support_level::trivial ) ||
-        std::is_trivially_destructible<StoredFunctor>::value,
-        "Assigned function object requires a non-trivial destructor."
+        (
+            std::is_trivially_destructible<StoredFunctor>::value &&
+            Manager::trivial_destroy
+        ),
+        "Assigned function object requires a functionoid with a non-trivial destructor."
     );
 
     static constexpr Invoker       const * invoker_type        = nullptr;
     static constexpr Manager       const * manager_type        = nullptr;
     static constexpr ActualFunctor const * actual_functor_type = nullptr;
     static constexpr StoredFunctor const * stored_functor_type = nullptr;
-    static constexpr vtable<Invoker, Traits> const stored_vtable { manager_type, actual_functor_type, stored_functor_type, IsEmptyHandler::value };
+    static constexpr vtable<Invoker, Traits> const stored_vtable{ manager_type, actual_functor_type, stored_functor_type, IsEmptyHandler::value };
 };
 #endif // MSVC workaround
 
@@ -863,7 +876,11 @@ protected:
     template <typename Constructor, typename ... Args>
     callable_base( no_eh_state_construction_trick_tag, Constructor const constructor, Args && ... args ) noexcept( noexcept( constructor( std::declval<callable_base &>(), std::forward<Args>( args )... ) ) )
     {
-		[[maybe_unused]] auto const & vtable( constructor( *this, std::forward<Args>( args )... ) );
+    #if !BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1914 ) )
+        // workaround for VS 2017 15.7 "'boost::functionoid::detail::vtable': illegal use of this type as an expression" dubious error
+        [[maybe_unused]]
+    #endif
+        auto const & vtable( constructor( *this, std::forward<Args>( args )... ) );
         BOOST_ASSUME( p_vtable_ == &vtable );
     }
 
