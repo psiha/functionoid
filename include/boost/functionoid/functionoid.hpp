@@ -263,13 +263,13 @@ private:
     template <bool direct, typename F>
     void do_assign( F && f )
     {
-        using functor_type = typename std::remove_const<typename std::remove_reference<F>::type>::type;
+        using functor_type = std::remove_const_t<std::remove_reference<F>>;
         using allocator    = typename Traits:: template allocator<functor_type>;
         do_assign<direct>( std::forward<F>( f ), allocator() );
     }
 
     template <bool direct, typename F, typename Allocator>
-    void dispatch_assign( F && f, Allocator const a, detail::function_obj_tag ) { do_assign<direct>( std::forward<F>( f ), std::forward<F>( f ), a ); }
+    void dispatch_assign( F && f   , Allocator const a, detail::function_obj_tag     ) { do_assign<direct>( std::forward<F>( f ), std::forward<F>( f ), a ); }
     // Explicit support for member function objects, so we invoke through
     // mem_fn() but retain the right target_type() values.
     template <bool direct, typename F, typename Allocator>
@@ -277,15 +277,15 @@ private:
     template <bool direct, typename F, typename Allocator>
     void dispatch_assign( F const f, Allocator const a, detail::function_obj_ref_tag ) { do_assign<direct, typename F::type>( f.get(),         f  , a ); }
     template <bool direct, typename F, typename Allocator>
-    void dispatch_assign( F const f, Allocator const a, detail::function_ptr_tag     )
+    void dispatch_assign( F       f, Allocator const a, detail::function_ptr_tag     )
     {
-        //   Plain function pointers need special care because when assigned
+        // Plain function pointers need special care because when assigned
         // using the syntax without the ampersand they wreck havoc with certain
         // compilers, causing either compilation failures or broken runtime
         // behaviour, e.g. not invoking the assigned target with GCC 4.0.1 or
         // causing access-violation crashes with MSVC (tested 8 and 10).
-        using non_const_function_pointer_t = typename std::add_pointer<typename std::remove_const<typename std::remove_pointer<F>::type>::type>::type;
-        do_assign<direct, non_const_function_pointer_t, non_const_function_pointer_t>( f, f, a );
+        using non_const_function_pointer_t = std::add_pointer_t<std::remove_const_t<std::remove_pointer_t<F>>>;
+        do_assign<direct, non_const_function_pointer_t, non_const_function_pointer_t>( f, std::move( f ), a );
     }
 
     template <bool direct, typename ActualFunctor, typename StoredFunctor, typename ActualFunctorAllocator>
@@ -293,11 +293,11 @@ private:
     {
         static_assert
         (
-            Traits::copyable == support_level::na || std::is_copy_constructible<StoredFunctor>::value,
+            Traits::copyable == support_level::na || std::is_copy_constructible_v<StoredFunctor>,
             "This callable instantiation requires copyable function objects."
         );
 
-		using NakedStoredFunctor     = typename std::remove_const<typename std::remove_reference<StoredFunctor>::type>::type;
+		using NakedStoredFunctor     = std::remove_const_t<std::remove_reference_t<StoredFunctor>>;
         using StoredFunctorAllocator = typename ActualFunctorAllocator:: template rebind<NakedStoredFunctor>::other;
         function_base:: template assign<direct, empty_handler>
         (
