@@ -3,7 +3,7 @@ from conans import ConanFile, CMake, tools
 
 class FunctionoidConan(ConanFile):
     name = "Functionoid"
-    version = "1.0.0"
+    version = "1.1.0"
     requires = 'Boost/1.68.0@microblink/stable'
     license = "MIT"
     url = "https://github.com/microblink/functionoid"
