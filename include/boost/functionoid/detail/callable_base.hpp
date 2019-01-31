@@ -512,14 +512,14 @@ using functor_manager = typename functor_manager_aux
     functor_traits<StoredFunctor, Buffer>::hasDefaultAlignement
 >::type;
 
-/// \note MSVC (14.1u5+) ICEs on function pointers with conditional noexcept
+/// \note MSVC (14.1u5) ICEs on function pointers with conditional noexcept
 /// specifiers in a template context.
 /// https://connect.microsoft.com/VisualStudio/feedback/details/3105692/ice-w-noexcept-function-pointer-in-a-template-context
 /// Additionally this compiler generates bad binaries if function references
 /// are used (instead of const pointers) by generating/storing 'null
 /// references'.
 ///                                       (14.10.2016.) (Domagoj Saric)
-#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1920 ) ) || ( defined( __clang__ ) && __clang_major__ >= 4 )
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) ) || ( defined( __clang__ ) && __clang_major__ >= 4 && __clang_major__ != 8 )
 #define BOOST_AUX_NOEXCEPT_PTR( condition )
 #else
 #define BOOST_AUX_NOEXCEPT_PTR( condition ) noexcept( condition )
@@ -735,6 +735,27 @@ struct vtable
     operator base_vtable const & () const noexcept { return reinterpret_cast<base_vtable const &>( *this ); }
 }; // struct vtable
 
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) )
+template <class Invoker, class Manager, class ActualFunctor, class StoredFunctor, class IsEmptyHandler, typename Traits>
+struct vtable_holder
+{
+    static_assert
+    (
+        ( Traits::destructor != support_level::trivial ) ||
+        (
+            std::is_trivially_destructible<StoredFunctor>::value &&
+            Manager::trivial_destroy
+        ),
+        "Assigned function object requires a functionoid with a non-trivial destructor."
+    );
+
+    static constexpr Invoker       const * invoker_type        = nullptr;
+    static constexpr Manager       const * manager_type        = nullptr;
+    static constexpr ActualFunctor const * actual_functor_type = nullptr;
+    static constexpr StoredFunctor const * stored_functor_type = nullptr;
+    static constexpr vtable<Invoker, Traits> const stored_vtable{ manager_type, actual_functor_type, stored_functor_type, IsEmptyHandler::value };
+};
+#endif // MSVC workaround
 
 template <typename T>
 T get_default_value( std::false_type /*not a reference type*/ ) { return {}; }
