@@ -5,7 +5,7 @@
 /// \file rtti.hpp
 /// --------------
 ///
-///  Copyright (c) Domagoj Saric 2010 - 2016
+///  Copyright (c) Domagoj Saric 2010 - 2019
 ///
 ///  Use, modification and distribution is subject to the Boost Software
 ///  License, Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
@@ -87,9 +87,9 @@ private:
         (
             ( type_id_ == other )
                 &
-            ( !const_qualified_ | other_const_qualified )
+            ( (!const_qualified_) | other_const_qualified )
                 &
-            ( !volatile_qualified_ | other_volatile_qualified )
+            ( (!volatile_qualified_) | other_volatile_qualified )
         );
         return types_match ? const_cast<void *>( p_functor_ ) : nullptr;
     }

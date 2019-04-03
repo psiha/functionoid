@@ -5,7 +5,7 @@
 /// \file functionoid.hpp
 /// ---------------------
 ///
-///  Copyright (c) Domagoj Saric 2010 - 2018
+///  Copyright (c) Domagoj Saric 2010 - 2019
 ///
 ///  Use, modification and distribution is subject to the Boost Software
 ///  License, Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
@@ -220,16 +220,18 @@ private:
 
         using invoker_type = invoker<Traits::is_noexcept, ReturnType, Arguments...>;
 
-#   if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) )
-        return vtable_holder<invoker_type, manager_type, ActualFunctor, StoredFunctor, is_empty_handler, Traits>::stored_vtable;
-#   else
         // http://stackoverflow.com/questions/24398102/constexpr-and-initialization-of-a-static-const-void-pointer-with-reinterpret-cas
         //
         // Note: it is extremely important that this initialization uses
         // static initialization. Otherwise, we will have a race
-        // condition here in multi-threaded code. See
+        // condition here in multi-threaded code or inefficient thread-safe
+		// initialization. See
         // http://thread.gmane.org/gmane.comp.lib.boost.devel/164902.
-        static constexpr detail::vtable<invoker_type, Traits> const the_vtable
+        static
+#	   if !BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1920 ) )
+			constexpr
+#		endif
+		detail::vtable<invoker_type, Traits> const the_vtable
         (
             static_cast<manager_type  const *>( nullptr ),
             static_cast<ActualFunctor const *>( nullptr ),
@@ -237,7 +239,6 @@ private:
             is_empty_handler::value
         );
         return the_vtable;
-#   endif
     } // vtable_for_functor_aux()
 
     template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
