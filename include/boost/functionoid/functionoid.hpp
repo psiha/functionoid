@@ -125,12 +125,12 @@ private: // Private implementation types.
 public: // Public function interface.
     callable() noexcept : function_base( empty_handler_vtable(), empty_handler() ) {}
 
-    template <typename Functor>
-    callable( Functor && f ) noexcept( std::is_nothrow_constructible<std::remove_reference_t<Functor>, Functor>::value /*...mrmlj...&& !is_heap_allocated*/ )
+    template <typename Functor> // SFINAE/enable if required by MSVC 16 for construction from a callable & (mutable reference)
+    callable( Functor && f, std::enable_if_t< !std::is_same_v< std::decay_t<Functor>, callable > > * = nullptr ) noexcept( std::is_nothrow_constructible_v<std::decay_t<Functor>, Functor> /*...mrmlj...&& !is_heap_allocated*/ )
         : function_base( no_eh_state_construction_trick_tag(), no_eh_state_constructor(), std::forward<Functor>( f ) ) {}
 
     template <typename Functor, typename Allocator>
-    callable( Functor && f, Allocator const a ) noexcept( std::is_nothrow_constructible<std::remove_reference_t<Functor>, Functor>::value /*...mrmlj...&& !is_heap_allocated*/ )
+    callable( Functor && f, Allocator const a ) noexcept( std::is_nothrow_constructible_v<std::decay_t<Functor>, Functor> /*...mrmlj...&& !is_heap_allocated*/ )
         : function_base( no_eh_state_construction_trick_tag(), no_eh_state_constructor(), std::forward<Functor>( f ), a ) {}
 
     callable( signature_type * const plain_function_pointer ) noexcept
