@@ -5,7 +5,7 @@
 /// \file functionoid.hpp
 /// ---------------------
 ///
-///  Copyright (c) Domagoj Saric 2010 - 2019
+///  Copyright (c) Domagoj Saric 2010 - 2020
 ///
 ///  Use, modification and distribution is subject to the Boost Software
 ///  License, Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
@@ -144,7 +144,7 @@ public: // Public function interface.
 
 	result_type BOOST_CC_FASTCALL operator()( Arguments... args ) const noexcept( Traits::is_noexcept )
 	{
-        return vtable().invoke( this->functor(), args... );
+        return vtable().invoke( this->functor(), std::move( args )... );
 	}
 
     callable & operator=( callable const  & f ) noexcept( Traits::copyable >= support_level::nofail ) { static_assert( Traits::copyable > support_level::na, "This callable instantiation is not copyable." ); this->assign( f ); return *this; }
@@ -190,7 +190,8 @@ private:
     }
 
     template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
-    static vtable_type const & vtable_for_functor_aux( std::false_type /*is not a callable*/, StoredFunctor const & /*functor*/ )
+    static constexpr
+    vtable_type const & vtable_for_functor_aux( std::false_type /*is not a callable*/, StoredFunctor const & /*functor*/ )
     {
         using namespace detail;
 
@@ -227,10 +228,7 @@ private:
         // condition here in multi-threaded code or inefficient thread-safe
 		// initialization. See
         // http://thread.gmane.org/gmane.comp.lib.boost.devel/164902.
-        static
-#	   if !BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1920 ) )
-			constexpr
-#		endif
+        static constexpr
 		detail::vtable<invoker_type, Traits> const the_vtable
         (
             static_cast<manager_type  const *>( nullptr ),

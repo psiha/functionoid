@@ -5,7 +5,7 @@
 /// \file callable_base.hpp
 /// -----------------------
 ///
-///  Copyright (c) Domagoj Saric 2010 - 2018
+///  Copyright (c) Domagoj Saric 2010 - 2020
 ///
 ///  Use, modification and distribution is subject to the Boost Software
 ///  License, Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
@@ -512,24 +512,12 @@ using functor_manager = typename functor_manager_aux
     functor_traits<StoredFunctor, Buffer>::hasDefaultAlignement
 >::type;
 
-/// \note MSVC (14.1u5) ICEs on function pointers with conditional noexcept
-/// specifiers in a template context.
-/// https://connect.microsoft.com/VisualStudio/feedback/details/3105692/ice-w-noexcept-function-pointer-in-a-template-context
-/// Additionally this compiler generates bad binaries if function references
-/// are used (instead of const pointers) by generating/storing 'null
-/// references'.
-///                                       (14.10.2016.) (Domagoj Saric)
-#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) ) || ( defined( __clang__ ) && __clang_major__ >= 4 && __clang_major__ != 8 )
-#define BOOST_AUX_NOEXCEPT_PTR( condition )
-#else
-#define BOOST_AUX_NOEXCEPT_PTR( condition ) noexcept( condition )
-#endif // MSVC workaround
 
 template <bool is_noexcept, typename ReturnType, typename ... InvokerArguments>
 struct invoker
 {
     template <typename Manager, typename StoredFunctor> constexpr invoker( Manager const *, StoredFunctor const * ) noexcept : invoke( &invoke_impl<Manager, StoredFunctor> ) {}
-    ReturnType (BOOST_CC_FASTCALL * const invoke)( function_buffer_base & __restrict buffer, InvokerArguments... args ) BOOST_AUX_NOEXCEPT_PTR( is_noexcept );
+    ReturnType (BOOST_CC_FASTCALL * const invoke)( function_buffer_base & __restrict buffer, InvokerArguments... args ) noexcept( is_noexcept );
 
     /// \note Defined here instead of within the callable template because
     /// of MSVC14 deficiencies with noexcept( expr ) function pointers (to
@@ -538,7 +526,7 @@ struct invoker
     template <typename FunctionObjManager, typename FunctionObj>
 	/// \note Argument order optimized for a pass-in-reg calling convention.
 	///                                   (17.10.2016.) (Domagoj Saric)
-	static ReturnType BOOST_CC_FASTCALL invoke_impl( detail::function_buffer_base & buffer, InvokerArguments... args ) BOOST_AUX_NOEXCEPT_PTR( is_noexcept ) // MSVC14u3 and Xcode8 AppleClang barf @ ( noexcept( std::declval<FunctionObj>( args... ) ) )
+	static ReturnType BOOST_CC_FASTCALL invoke_impl( detail::function_buffer_base & buffer, InvokerArguments... args ) noexcept( is_noexcept ) // MSVC14u3 and Xcode8 AppleClang barf @ ( noexcept( std::declval<FunctionObj>( args... ) ) )
 	{
 		// We provide the invoker with a manager with a minimum amount of
 		// type information (because it already knows the stored function
@@ -548,9 +536,9 @@ struct invoker
 		// a plain void * in case of the trivial managers. In case of the
 		// trivial ptr manager it is even a void * * so a double static_cast
 		// (or a reinterpret_cast) is necessary.
-        auto * __restrict const p_function_object // MSVC 14.1u5 broke restricted references
+        auto & __restrict function_object
 		(
-			static_cast<FunctionObj *>
+			*static_cast<FunctionObj *>
 			(
 				static_cast<void *>
 				(
@@ -558,8 +546,8 @@ struct invoker
 				)
 			)
 		);
-        static_assert( noexcept( (*p_function_object)( args... ) ) >= is_noexcept, "Trying to assign a not-noexcept function object to a noexcept functionoid." );
-		return (*p_function_object)( args... );
+        static_assert( noexcept( function_object( args... ) ) >= is_noexcept, "Trying to assign a not-noexcept function object to a noexcept functionoid." );
+		return function_object( std::forward<InvokerArguments>( args )... );
 	}
 }; // invoker
 
@@ -567,7 +555,7 @@ template <support_level Level>
 struct destroyer
 {
     template <typename Manager> constexpr destroyer( Manager const * ) noexcept : destroy( &Manager::destroy ) {}
-    void (BOOST_CC_FASTCALL * const destroy)( function_buffer_base & __restrict buffer ) BOOST_AUX_NOEXCEPT_PTR( Level >= support_level::nofail );
+    void (BOOST_CC_FASTCALL * const destroy)( function_buffer_base & __restrict buffer ) noexcept( Level >= support_level::nofail );
 };
 template <>
 struct destroyer<support_level::trivial>
@@ -582,7 +570,7 @@ template <support_level Level>
 struct cloner
 {
     template <typename Manager> constexpr cloner( Manager const * ) noexcept : clone( &Manager::clone ) {}
-    void (BOOST_CC_FASTCALL * const clone)( function_buffer_base const &  __restrict in_buffer, function_buffer_base & __restrict out_buffer ) BOOST_AUX_NOEXCEPT_PTR( Level >= support_level::nofail );
+    void (BOOST_CC_FASTCALL * const clone)( function_buffer_base const &  __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept( Level >= support_level::nofail );
 };
 template <>
 struct cloner<support_level::trivial>
@@ -597,7 +585,7 @@ template <support_level Level>
 struct mover
 {
     template <typename Manager> constexpr mover( Manager const * ) noexcept : move( &Manager::move ) {}
-    void (BOOST_CC_FASTCALL * const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) BOOST_AUX_NOEXCEPT_PTR( Level >= support_level::nofail );
+    void (BOOST_CC_FASTCALL * const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept( Level >= support_level::nofail );
 };
 template <>
 struct mover<support_level::trivial>
@@ -636,9 +624,15 @@ struct empty_checker<false>
     }
 };
 
-/// \note See the above note for BOOST_AUX_NOEXCEPT_PTR.
+
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1903 ) )  // still @ 16.6
+/// \note MSVC (14.1u5+) ICEs on function pointers with conditional noexcept
+/// specifiers in a template context.
+/// https://connect.microsoft.com/VisualStudio/feedback/details/3105692/ice-w-noexcept-function-pointer-in-a-template-context
+/// Additionally this compiler generates bad binaries if function references
+/// are used (instead of const pointers) by generating/storing 'null
+/// references'.
 ///                                       (14.10.2016.) (Domagoj Saric)
-#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1903 ) )
 template <typename ReturnType, typename ... InvokerArguments>
 struct invoker<true, ReturnType, InvokerArguments...>
 {
@@ -648,9 +642,8 @@ struct invoker<true, ReturnType, InvokerArguments...>
     template <typename FunctionObjManager, typename FunctionObj>
 	static ReturnType BOOST_CC_FASTCALL invoke_impl( detail::function_buffer_base & buffer, InvokerArguments... args ) noexcept
 	{
-        // MSVC 14.1u5 broke restricted references
-		auto * __restrict const p_function_object( static_cast<FunctionObj *>( static_cast<void *>( FunctionObjManager::functor_ptr( buffer ) ) ) );
-		return (*p_function_object)( args... );
+		auto & __restrict function_object( *static_cast<FunctionObj *>( static_cast<void *>( FunctionObjManager::functor_ptr( buffer ) ) ) );
+		return function_object( std::forward<InvokerArguments>( args )... );
 	}
 };
 template <>
@@ -669,11 +662,11 @@ template <>
 struct mover<support_level::nofail>
 {
     void (BOOST_CC_FASTCALL * const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept;
-    template <typename Manager> constexpr mover( Manager const * ) noexcept : move( reinterpret_cast<decltype( move )>( &Manager::move ) ) // more MSVC noexcept( <expr> ) brainfarts
+    template <typename Manager> constexpr mover( Manager const * ) noexcept : move( &Manager::move )
     { static_assert( noexcept( Manager::move( std::declval<function_buffer_base &&>(), std::declval<function_buffer_base &>() ) ) ); }
 };
 #endif // MSVC workaround
-#undef BOOST_AUX_NOEXCEPT_PTR
+
 
 template <typename Invoker, typename Traits>
 // Implementation note:
@@ -735,27 +728,6 @@ struct vtable
     operator base_vtable const & () const noexcept { return reinterpret_cast<base_vtable const &>( *this ); }
 }; // struct vtable
 
-#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) )
-template <class Invoker, class Manager, class ActualFunctor, class StoredFunctor, class IsEmptyHandler, typename Traits>
-struct vtable_holder
-{
-    static_assert
-    (
-        ( Traits::destructor != support_level::trivial ) ||
-        (
-            std::is_trivially_destructible<StoredFunctor>::value &&
-            Manager::trivial_destroy
-        ),
-        "Assigned function object requires a functionoid with a non-trivial destructor."
-    );
-
-    static constexpr Invoker       const * invoker_type        = nullptr;
-    static constexpr Manager       const * manager_type        = nullptr;
-    static constexpr ActualFunctor const * actual_functor_type = nullptr;
-    static constexpr StoredFunctor const * stored_functor_type = nullptr;
-    static constexpr vtable<Invoker, Traits> const stored_vtable{ manager_type, actual_functor_type, stored_functor_type, IsEmptyHandler::value };
-};
-#endif // MSVC workaround
 
 template <typename T>
 T get_default_value( std::false_type /*not a reference type*/ ) { return {}; }
