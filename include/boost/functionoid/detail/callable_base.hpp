@@ -512,12 +512,24 @@ using functor_manager = typename functor_manager_aux
     functor_traits<StoredFunctor, Buffer>::hasDefaultAlignement
 >::type;
 
+/// \note MSVC (14.1u5 : 16.6+) ICEs on function pointers with conditional noexcept
+/// specifiers in a template context.
+/// https://connect.microsoft.com/VisualStudio/feedback/details/3105692/ice-w-noexcept-function-pointer-in-a-template-context
+/// Additionally this compiler generates bad binaries if function references
+/// are used (instead of const pointers) by generating/storing 'null
+/// references'.
+///                                       (14.10.2016.) (Domagoj Saric)
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) )
+#define BOOST_AUX_NOEXCEPT_PTR( condition )
+#else
+#define BOOST_AUX_NOEXCEPT_PTR( condition ) noexcept( condition )
+#endif // MSVC workaround
 
 template <bool is_noexcept, typename ReturnType, typename ... InvokerArguments>
 struct invoker
 {
     template <typename Manager, typename StoredFunctor> constexpr invoker( Manager const *, StoredFunctor const * ) noexcept : invoke( &invoke_impl<Manager, StoredFunctor> ) {}
-    ReturnType (BOOST_CC_FASTCALL * const invoke)( function_buffer_base & buffer, InvokerArguments... args ) noexcept( is_noexcept );
+    ReturnType (BOOST_CC_FASTCALL * const invoke)( function_buffer_base & buffer, InvokerArguments... args ) BOOST_AUX_NOEXCEPT_PTR( is_noexcept );
 
     /// \note Defined here instead of within the callable template because
     /// of MSVC14 deficiencies with noexcept( expr ) function pointers (to
@@ -555,7 +567,7 @@ template <support_level Level>
 struct destroyer
 {
     template <typename Manager> constexpr destroyer( Manager const * ) noexcept : destroy( &Manager::destroy ) {}
-    void (BOOST_CC_FASTCALL * const destroy)( function_buffer_base & __restrict buffer ) noexcept( Level >= support_level::nofail );
+    void (BOOST_CC_FASTCALL * const destroy)( function_buffer_base & __restrict buffer ) BOOST_AUX_NOEXCEPT_PTR( Level >= support_level::nofail );
 };
 template <>
 struct destroyer<support_level::trivial>
@@ -570,7 +582,7 @@ template <support_level Level>
 struct cloner
 {
     template <typename Manager> constexpr cloner( Manager const * ) noexcept : clone( &Manager::clone ) {}
-    void (BOOST_CC_FASTCALL * const clone)( function_buffer_base const &  __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept( Level >= support_level::nofail );
+    void (BOOST_CC_FASTCALL * const clone)( function_buffer_base const &  __restrict in_buffer, function_buffer_base & __restrict out_buffer ) BOOST_AUX_NOEXCEPT_PTR( Level >= support_level::nofail );
 };
 template <>
 struct cloner<support_level::trivial>
@@ -585,7 +597,7 @@ template <support_level Level>
 struct mover
 {
     template <typename Manager> constexpr mover( Manager const * ) noexcept : move( &Manager::move ) {}
-    void (BOOST_CC_FASTCALL * const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept( Level >= support_level::nofail );
+    void (BOOST_CC_FASTCALL * const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) BOOST_AUX_NOEXCEPT_PTR( Level >= support_level::nofail );
 };
 template <>
 struct mover<support_level::trivial>
@@ -625,13 +637,10 @@ struct empty_checker<false>
 };
 
 
-#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1903 /*still @ 16.6*/ ) ) || defined( __clang__ /*NDK r21 TODO test more versions*/ )
-/// \note MSVC (14.1u5+) ICEs on function pointers with conditional noexcept
-/// specifiers in a template context.
-/// https://connect.microsoft.com/VisualStudio/feedback/details/3105692/ice-w-noexcept-function-pointer-in-a-template-context
-/// Additionally this compiler generates bad binaries if function references
-/// are used (instead of const pointers) by generating/storing 'null
-/// references'.
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1903 ) ) || defined( __clang__ /*NDK r21 TODO test more versions*/ )
+/// \note Clang seems to uncoditionally 'see' invoke_impl (in the main template) as not noexcept and then errors at the
+///  assignment.
+///  See the above note for BOOST_AUX_NOEXCEPT_PTR for MSVC.
 ///                                       (14.10.2016.) (Domagoj Saric)
 template <typename ReturnType, typename ... InvokerArguments>
 struct invoker<true, ReturnType, InvokerArguments...>
@@ -665,6 +674,7 @@ struct mover<support_level::nofail>
     template <typename Manager> constexpr mover( Manager const * ) noexcept : move( &Manager::move )
     { static_assert( noexcept( Manager::move( std::declval<function_buffer_base &&>(), std::declval<function_buffer_base &>() ) ) ); }
 };
+#undef BOOST_AUX_NOEXCEPT_PTR
 #endif // MSVC workaround
 
 
