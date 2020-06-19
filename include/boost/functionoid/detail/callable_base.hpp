@@ -1163,7 +1163,7 @@ void callable_base<Traits>::assign
 	if ( has_empty_target( f, tag() ) )
 		this->clear<direct, EmptyHandler>( empty_handler_vtable );
 	else
-	if ( direct )
+	if constexpr ( direct )
 	{
         // Implementation note:
         //   See the note for the no_eh_state_constructor helper in
