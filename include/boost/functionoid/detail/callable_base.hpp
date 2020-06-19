@@ -519,7 +519,7 @@ using functor_manager = typename functor_manager_aux
 /// are used (instead of const pointers) by generating/storing 'null
 /// references'.
 ///                                       (14.10.2016.) (Domagoj Saric)
-#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) ) || ( defined( __clang__ ) && __clang_major__ <= 7 )
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) ) || ( defined( __clang__ ) && __clang_major__ <= 7 ) || defined( BOOST_GCC /*10.1*/ )
 #define BOOST_AUX_NOEXCEPT_PTR( condition )
 #else
 #define BOOST_AUX_NOEXCEPT_PTR( condition ) noexcept( condition )
@@ -637,7 +637,7 @@ struct empty_checker<false>
 };
 
 
-#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1903 ) ) || defined( __clang__ /*NDK r21 TODO test more versions*/ )
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1903 ) ) || defined( __clang__ /*NDK r21 TODO test more versions*/ ) || defined( BOOST_GCC /*10.1*/ )
 /// \note Clang seems to uncoditionally 'see' invoke_impl (in the main template) as not noexcept and then errors at the
 ///  assignment.
 ///  See the above note for BOOST_AUX_NOEXCEPT_PTR for MSVC.
@@ -675,7 +675,7 @@ struct mover<support_level::nofail>
     { static_assert( noexcept( Manager::move( std::declval<function_buffer_base &&>(), std::declval<function_buffer_base &>() ) ) ); }
 };
 #undef BOOST_AUX_NOEXCEPT_PTR
-#endif // MSVC workaround
+#endif // conditional noexcept mess workarounds
 
 
 template <typename Invoker, typename Traits>
