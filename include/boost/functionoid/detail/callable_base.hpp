@@ -670,7 +670,7 @@ struct cloner<support_level::nofail>
 template <>
 struct mover<support_level::nofail>
 {
-    void (BOOST_CC_FASTCALL * const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept;
+    void (BOOST_CC_FASTCALL * const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) BOOST_AUX_NOEXCEPT_PTR( true ); // more MSVC noexcept( <expr> ) brainfarts
     template <typename Manager> constexpr mover( Manager const * ) noexcept : move( &Manager::move )
     { static_assert( noexcept( Manager::move( std::declval<function_buffer_base &&>(), std::declval<function_buffer_base &>() ) ) ); }
 };
