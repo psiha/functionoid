@@ -296,7 +296,7 @@ private:
         );
 
 		using NakedStoredFunctor     = std::remove_const_t<std::remove_reference_t<StoredFunctor>>;
-        using StoredFunctorAllocator = typename ActualFunctorAllocator:: template rebind<NakedStoredFunctor>::other;
+        using StoredFunctorAllocator = typename std::allocator_traits<ActualFunctorAllocator>::template rebind_alloc<NakedStoredFunctor>;
         function_base:: template assign<direct, empty_handler>
         (
             std::forward<StoredFunctor>( stored_functor ),

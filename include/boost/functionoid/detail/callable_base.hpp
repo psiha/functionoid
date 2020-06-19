@@ -262,7 +262,7 @@ template <typename Allocator>
 struct manager_trivial_heap
 {
 private:
-    using trivial_allocator = typename Allocator:: template rebind<unsigned char>::other;
+    using trivial_allocator = typename std::allocator_traits<Allocator>::template rebind_alloc<unsigned char>;
 
 public:
     static bool constexpr trivial_destroy = false;
@@ -367,9 +367,9 @@ public:
 	using Functor           = FunctorParam  ;
 	using OriginalAllocator = AllocatorParam;
 
-    using functor_and_allocator_t =          functor_and_allocator<Functor, OriginalAllocator>                  ;
-    using wrapper_allocator_t     = typename OriginalAllocator:: template rebind<functor_and_allocator_t>::other;
-    using allocator_allocator_t   = typename OriginalAllocator:: template rebind<OriginalAllocator      >::other;
+    using functor_and_allocator_t = functor_and_allocator<Functor, OriginalAllocator>                                                ;
+    using wrapper_allocator_t     = typename std::allocator_traits<OriginalAllocator>::template rebind_alloc<functor_and_allocator_t>;
+    using allocator_allocator_t   = typename std::allocator_traits<OriginalAllocator>::template rebind_alloc<OriginalAllocator      >;
 
     static functor_and_allocator_t * functor_ptr( function_buffer_base & buffer )
     {
