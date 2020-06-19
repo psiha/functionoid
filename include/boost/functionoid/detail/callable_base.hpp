@@ -517,7 +517,7 @@ template <bool is_noexcept, typename ReturnType, typename ... InvokerArguments>
 struct invoker
 {
     template <typename Manager, typename StoredFunctor> constexpr invoker( Manager const *, StoredFunctor const * ) noexcept : invoke( &invoke_impl<Manager, StoredFunctor> ) {}
-    ReturnType (BOOST_CC_FASTCALL * const invoke)( function_buffer_base & __restrict buffer, InvokerArguments... args ) noexcept( is_noexcept );
+    ReturnType (BOOST_CC_FASTCALL * const invoke)( function_buffer_base & buffer, InvokerArguments... args ) noexcept( is_noexcept );
 
     /// \note Defined here instead of within the callable template because
     /// of MSVC14 deficiencies with noexcept( expr ) function pointers (to
@@ -526,7 +526,7 @@ struct invoker
     template <typename FunctionObjManager, typename FunctionObj>
 	/// \note Argument order optimized for a pass-in-reg calling convention.
 	///                                   (17.10.2016.) (Domagoj Saric)
-	static ReturnType BOOST_CC_FASTCALL invoke_impl( detail::function_buffer_base & buffer, InvokerArguments... args ) noexcept( is_noexcept ) // MSVC14u3 and Xcode8 AppleClang barf @ ( noexcept( std::declval<FunctionObj>( args... ) ) )
+	static ReturnType BOOST_CC_FASTCALL invoke_impl( function_buffer_base & buffer, InvokerArguments... args ) noexcept( is_noexcept )
 	{
 		// We provide the invoker with a manager with a minimum amount of
 		// type information (because it already knows the stored function
@@ -625,7 +625,7 @@ struct empty_checker<false>
 };
 
 
-#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1903 ) )  // still @ 16.6
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1903 /*still @ 16.6*/ ) ) || defined( __clang__ /*NDK r21 TODO test more versions*/ )
 /// \note MSVC (14.1u5+) ICEs on function pointers with conditional noexcept
 /// specifiers in a template context.
 /// https://connect.microsoft.com/VisualStudio/feedback/details/3105692/ice-w-noexcept-function-pointer-in-a-template-context

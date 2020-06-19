@@ -190,8 +190,7 @@ private:
     }
 
     template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
-    static constexpr
-    vtable_type const & vtable_for_functor_aux( std::false_type /*is not a callable*/, StoredFunctor const & /*functor*/ )
+    static vtable_type const & vtable_for_functor_aux( std::false_type /*is not a callable*/, StoredFunctor const & /*functor*/ )
     {
         using namespace detail;
 
