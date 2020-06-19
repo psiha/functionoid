@@ -519,7 +519,7 @@ using functor_manager = typename functor_manager_aux
 /// are used (instead of const pointers) by generating/storing 'null
 /// references'.
 ///                                       (14.10.2016.) (Domagoj Saric)
-#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) )
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) ) || ( defined( __clang__ ) && __clang_major__ <= 7 )
 #define BOOST_AUX_NOEXCEPT_PTR( condition )
 #else
 #define BOOST_AUX_NOEXCEPT_PTR( condition ) noexcept( condition )
@@ -538,7 +538,7 @@ struct invoker
     template <typename FunctionObjManager, typename FunctionObj>
 	/// \note Argument order optimized for a pass-in-reg calling convention.
 	///                                   (17.10.2016.) (Domagoj Saric)
-	static ReturnType BOOST_CC_FASTCALL invoke_impl( function_buffer_base & buffer, InvokerArguments... args ) noexcept( is_noexcept )
+	static ReturnType BOOST_CC_FASTCALL invoke_impl( function_buffer_base & buffer, InvokerArguments... args ) BOOST_AUX_NOEXCEPT_PTR( is_noexcept )
 	{
 		// We provide the invoker with a manager with a minimum amount of
 		// type information (because it already knows the stored function
