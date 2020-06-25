@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 ///
 /// Boost.Functionoid library
-/// 
+///
 /// \file functionoid.hpp
 /// ---------------------
 ///
@@ -144,7 +144,7 @@ public: // Public function interface.
 
 	result_type BOOST_CC_FASTCALL operator()( Arguments... args ) const noexcept( Traits::is_noexcept )
 	{
-        return vtable().invoke( this->functor(), std::move( args )... );
+        return vtable().invoke( this->functor(), std::forward< Arguments >( args )... );
 	}
 
     callable & operator=( callable const  & f ) noexcept( Traits::copyable >= support_level::nofail ) { static_assert( Traits::copyable > support_level::na, "This callable instantiation is not copyable." ); this->assign( f ); return *this; }
