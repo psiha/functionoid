@@ -140,24 +140,22 @@ public: // Public function interface.
         : function_base( static_cast<function_base const &>( f ), empty_handler_vtable() ) { static_assert( Traits::copyable > support_level::na, "This callable instantiation is not copyable." ); }
 
 	callable( callable && f ) noexcept( Traits::moveable >= support_level::nofail )
-		: function_base( static_cast<function_base&&>( f ), empty_handler_vtable() ) {}
+		: function_base( static_cast<function_base &&>( f ), empty_handler_vtable() ) {}
 
-	result_type BOOST_CC_FASTCALL operator()( Arguments... args ) const noexcept( Traits::is_noexcept )
+    template <typename ... CallArguments>
+	result_type BOOST_CC_FASTCALL operator()( CallArguments &&... args ) const noexcept( Traits::is_noexcept )
 	{
-        return vtable().invoke( this->functor(), std::forward< Arguments >( args )... );
+        return vtable().invoke( this->functor(), std::forward< CallArguments >( args )... );
 	}
 
-    callable & operator=( callable const  & f ) noexcept( Traits::copyable >= support_level::nofail ) { static_assert( Traits::copyable > support_level::na, "This callable instantiation is not copyable." ); this->assign( f ); return *this; }
+    callable & operator=( callable const  & f ) noexcept( Traits::copyable >= support_level::nofail ) { static_assert( Traits::copyable > support_level::na, "This callable instantiation is not copyable." ); this->assign(            f   ); return *this; }
     callable & operator=( callable       && f ) noexcept( Traits::moveable >= support_level::nofail ) { static_assert( Traits::moveable > support_level::na, "This callable instantiation is not moveable." ); this->assign( std::move( f ) ); return *this; }
     callable & operator=( signature_type * const plain_function_pointer ) noexcept { this->assign( plain_function_pointer ); return *this; }
     template <typename F>
     callable & operator=( F && f ) noexcept { this->assign( std::forward<F>( f ) ); return *this; }
 
-    template <typename F>
-    void assign( F && f                    ) { this->do_assign<false>( std::forward<F>( f )    ); }
-
-    template <typename F, typename Allocator>
-    void assign( F && f, Allocator const a ) { this->do_assign<false>( std::forward<F>( f ), a ); }
+    template <typename F                    > void assign( F && f                    ) { this->do_assign<false>( std::forward<F>( f )    ); }
+    template <typename F, typename Allocator> void assign( F && f, Allocator const a ) { this->do_assign<false>( std::forward<F>( f ), a ); }
 
     /// Clear out a target (replace it with an empty handler), if there is one.
     void clear() { function_base:: template clear<false, empty_handler>( empty_handler_vtable() ); }

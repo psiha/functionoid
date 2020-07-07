@@ -532,12 +532,22 @@ struct invoker
     ReturnType (BOOST_CC_FASTCALL * const invoke)( function_buffer_base & buffer, InvokerArguments... args ) BOOST_AUX_NOEXCEPT_PTR( is_noexcept );
 
     /// \note Defined here instead of within the callable template because
-    /// of MSVC14 deficiencies with noexcept( expr ) function pointers (to
+    /// of MSVC deficiencies with noexcept( expr ) function pointers (to
     /// enable the specialization workaround).
     ///                                   (17.10.2016.) (Domagoj Saric)
     template <typename FunctionObjManager, typename FunctionObj>
 	/// \note Argument order optimized for a pass-in-reg calling convention.
 	///                                   (17.10.2016.) (Domagoj Saric)
+    /// \todo For arguments that cannot be passed in registers (eg. ineligible
+    /// PODs or non-trivially copyable or moveable types) it would be more
+    /// efficient to pass those by reference (i.e. do a type transformation
+    /// on the InvokerArguments pack) in case the function_object() call
+    /// cannot be inlined (to avoid one extra copy). Handling this is
+    /// nontrivial so for now the user can handle/workaround this easily by
+    /// using callables with signatures that do not specify argument types
+    /// that cannot be passed in registers in case these will be used with
+    /// noninlineable function objects.
+    ///                                   (07.07.2020.) (Domagoj Saric)
 	static ReturnType BOOST_CC_FASTCALL invoke_impl( function_buffer_base & buffer, InvokerArguments... args ) BOOST_AUX_NOEXCEPT_PTR( is_noexcept )
 	{
 		// We provide the invoker with a manager with a minimum amount of
