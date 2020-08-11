@@ -50,7 +50,7 @@ public: // Public typedefs/introspection section.
 	static constexpr std::uint8_t arity = sizeof...( Arguments );
 
     template <typename FunctionObject>
-    static bool constexpr requiresAllocation = !detail::functor_traits<FunctionObject, buffer>::allowsSmallObjectOptimization;
+    static bool constexpr requires_allocation = !detail::functor_traits<FunctionObject, buffer>::allowsSmallObjectOptimization;
 
 private: // Private implementation types.
     // We need a specific thin wrapper around the base empty handler that will
@@ -115,7 +115,7 @@ private: // Private implementation types.
         template <typename F>
         base_vtable const & operator()( function_base & base, F && f ) const noexcept( std::is_nothrow_constructible<std::remove_reference_t<F>, F>::value )
         {
-		    using NakedFunctionObj = typename std::remove_const<typename std::remove_reference<F>::type>::type;
+		    using NakedFunctionObj = std::remove_const_t<std::remove_reference_t<F>>;
 		    return (*this)( base, std::forward<F>( f ), typename Traits:: template allocator<NakedFunctionObj>() );
         }
     }; // struct no_eh_state_constructor
@@ -123,18 +123,18 @@ private: // Private implementation types.
     using no_eh_state_construction_trick_tag = typename function_base::no_eh_state_construction_trick_tag;
 
 public: // Public function interface.
-    callable() noexcept : function_base( empty_handler_vtable(), empty_handler() ) {}
+    callable() noexcept : function_base( empty_handler_vtable(), empty_handler{} ) {}
 
     template <typename Functor> // SFINAE/enable if required by MSVC 16 for construction from a callable & (mutable reference)
     callable( Functor && f, std::enable_if_t< !std::is_same_v< std::decay_t<Functor>, callable > > * = nullptr ) noexcept( std::is_nothrow_constructible_v<std::decay_t<Functor>, Functor> /*...mrmlj...&& !is_heap_allocated*/ )
-        : function_base( no_eh_state_construction_trick_tag(), no_eh_state_constructor(), std::forward<Functor>( f ) ) {}
+        : function_base( no_eh_state_construction_trick_tag{}, no_eh_state_constructor{}, std::forward<Functor>( f ) ) {}
 
     template <typename Functor, typename Allocator>
     callable( Functor && f, Allocator const a ) noexcept( std::is_nothrow_constructible_v<std::decay_t<Functor>, Functor> /*...mrmlj...&& !is_heap_allocated*/ )
-        : function_base( no_eh_state_construction_trick_tag(), no_eh_state_constructor(), std::forward<Functor>( f ), a ) {}
+        : function_base( no_eh_state_construction_trick_tag{}, no_eh_state_constructor{}, std::forward<Functor>( f ), a ) {}
 
     callable( signature_type * const plain_function_pointer ) noexcept
-        : function_base( no_eh_state_construction_trick_tag(), no_eh_state_constructor(), plain_function_pointer ) {}
+        : function_base( no_eh_state_construction_trick_tag{}, no_eh_state_constructor{}, plain_function_pointer ) {}
 
     callable( callable const & f ) noexcept( Traits::copyable >= support_level::nofail )
         : function_base( static_cast<function_base const &>( f ), empty_handler_vtable() ) { static_assert( Traits::copyable > support_level::na, "This callable instantiation is not copyable." ); }
@@ -154,8 +154,11 @@ public: // Public function interface.
     template <typename F>
     callable & operator=( F && f ) noexcept { this->assign( std::forward<F>( f ) ); return *this; }
 
-    template <typename F                    > void assign( F && f                    ) { this->do_assign<false>( std::forward<F>( f )    ); }
-    template <typename F, typename Allocator> void assign( F && f, Allocator const a ) { this->do_assign<false>( std::forward<F>( f ), a ); }
+    template <typename F>
+    void assign( F && f                    ) { this->do_assign<false>( std::forward<F>( f )    ); }
+
+    template <typename F, typename Allocator>
+    void assign( F && f, Allocator const a ) { this->do_assign<false>( std::forward<F>( f ), a ); }
 
     /// Clear out a target (replace it with an empty handler), if there is one.
     void clear() { function_base:: template clear<false, empty_handler>( empty_handler_vtable() ); }
@@ -183,7 +186,7 @@ private:
     template <typename Allocator, typename ActualFunctor>
     static vtable_type const & vtable_for_functor_aux( std::true_type /*is a callable*/, callable const & functor )
     {
-        static_assert( std::is_base_of<callable, typename std::remove_reference<ActualFunctor>::type>::value );
+        static_assert( std::is_base_of_v<callable, std::remove_reference_t<ActualFunctor>> );
         return functor.vtable();
     }
 
@@ -199,12 +202,12 @@ private:
         using is_empty_handler = std::is_same<ActualFunctor, empty_handler>;
         using manager_type = functor_manager
         <
-            typename std::conditional
+            std::conditional_t
             <
                 is_empty_handler::value,
                 ActualFunctor,
                 StoredFunctor
-            >::type,
+            >,
             Allocator,
             buffer
         >;
@@ -218,8 +221,6 @@ private:
 
         using invoker_type = invoker<Traits::is_noexcept, ReturnType, Arguments...>;
 
-        // http://stackoverflow.com/questions/24398102/constexpr-and-initialization-of-a-static-const-void-pointer-with-reinterpret-cas
-        //
         // Note: it is extremely important that this initialization uses
         // static initialization. Otherwise, we will have a race
         // condition here in multi-threaded code or inefficient thread-safe
@@ -227,12 +228,12 @@ private:
         // http://thread.gmane.org/gmane.comp.lib.boost.devel/164902.
         static constexpr
 		detail::vtable<invoker_type, Traits> const the_vtable
-        (
+        {
             static_cast<manager_type  const *>( nullptr ),
             static_cast<ActualFunctor const *>( nullptr ),
             static_cast<StoredFunctor const *>( nullptr ),
             is_empty_handler::value
-        );
+        };
         return the_vtable;
     } // vtable_for_functor_aux()
 
@@ -253,7 +254,7 @@ private:
     void do_assign( F && f, Allocator const a )
     {
         using tag = typename detail::get_function_tag<F>::type;
-        dispatch_assign<direct>( std::forward<F>( f ), a, tag() );
+        dispatch_assign<direct>( std::forward<F>( f ), a, tag{} );
     }
 
     template <bool direct, typename F>
@@ -261,7 +262,7 @@ private:
     {
         using functor_type = std::remove_const_t<std::remove_reference<F>>;
         using allocator    = typename Traits:: template allocator<functor_type>;
-        do_assign<direct>( std::forward<F>( f ), allocator() );
+        do_assign<direct>( std::forward<F>( f ), allocator{} );
     }
 
     template <bool direct, typename F, typename Allocator>
@@ -301,7 +302,7 @@ private:
             vtable_for_functor<StoredFunctorAllocator, ActualFunctor>( stored_functor ),
             empty_handler_vtable(),
             StoredFunctorAllocator( a ),
-            std::is_base_of<callable, NakedStoredFunctor>() /*are we assigning another callable?*/
+            std::is_base_of<detail::callable_tag, NakedStoredFunctor>{} /*are we assigning another callable?*/
         );
     }
 }; // class callable

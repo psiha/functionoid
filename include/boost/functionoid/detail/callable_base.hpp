@@ -44,6 +44,12 @@ namespace detail
 {
 //------------------------------------------------------------------------------
 
+#ifdef __clang__
+#   define BOOST_AUX_NO_SANITIZE __attribute__(( no_sanitize( "function" ) ))
+#else
+#   define BOOST_AUX_NO_SANITIZE
+#endif
+
 // http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0302r0.html Deprecating Allocator Support in std::function
 using dummy_allocator = std::allocator<void *>;
 
@@ -112,8 +118,8 @@ using is_msvc_exception_specified_function_pointer = std::integral_constant
 <
     bool,
 #ifdef _MSC_VER
-    !std::is_class      <T>::value &&
-    !std::is_fundamental<T>::value &&
+    !std::is_class_v      <T> &&
+    !std::is_fundamental_v<T> &&
     ( sizeof( T ) == sizeof( void (*)() ) )
 #else
     false
@@ -124,13 +130,13 @@ template <typename F>
 struct get_function_tag
 {
 private:
-	using ptr_or_obj_tag = typename std::conditional<(std::is_pointer<F>::value || std::is_function<F>::value),
+	using ptr_or_obj_tag = std::conditional_t<(std::is_pointer_v<F> || std::is_function_v<F>),
 								function_ptr_tag,
-								function_obj_tag>::type;
+								function_obj_tag>;
 
-	using ptr_or_obj_or_mem_tag = typename std::conditional<(std::is_member_pointer<F>::value),
+	using ptr_or_obj_or_mem_tag = std::conditional_t<std::is_member_pointer_v<F>,
 								member_ptr_tag,
-								ptr_or_obj_tag>::type;
+								ptr_or_obj_tag>;
 public:
 	using type = ptr_or_obj_or_mem_tag;
 }; // get_function_tag
@@ -142,7 +148,8 @@ template <typename F> struct get_function_tag<boost::reference_wrapper<F>> { usi
 template <typename F, typename A>
 struct functor_and_allocator : F, A // enable EBO
 {
-	functor_and_allocator( F const & f, A a ) : F( f ), A( a ) {}
+    template <typename U>
+	functor_and_allocator( U && f, A a ) : F{ std::forward<U>( f ) }, A{ a } {}
 
 	F       & functor  ()       { return *this; }
 	F const & functor  () const { return *this; }
@@ -154,8 +161,8 @@ template <typename Functor, typename Buffer>
 struct functor_traits
 {
     static constexpr bool allowsPODOptimization =
-            std::is_trivially_copy_constructible<Functor>::value &&
-            std::is_trivially_destructible      <Functor>::value;
+            std::is_trivially_copy_constructible_v<Functor> &&
+            std::is_trivially_destructible_v      <Functor>;
 
     static constexpr bool allowsSmallObjectOptimization =
 			( sizeof ( Buffer ) >= sizeof ( Functor )      ) &&
@@ -241,7 +248,7 @@ struct manager_trivial_small
 
     static void BOOST_CC_FASTCALL clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
     {
-        assign( Buffer::from_base( in_buffer ), Buffer::from_base( out_buffer ), dummy_allocator() );
+        assign( Buffer::from_base( in_buffer ), Buffer::from_base( out_buffer ), dummy_allocator{} );
     }
 
     static void BOOST_CC_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
@@ -335,20 +342,23 @@ struct manager_small
         new ( functor_ptr( out_buffer ) ) Functor( std::forward<F>( functor ) );
     }
 
-    static void BOOST_CC_FASTCALL clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer ) noexcept( std::is_nothrow_copy_constructible<Functor>::value )
+    static void BOOST_CC_FASTCALL clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer ) noexcept( std::is_nothrow_copy_constructible_v<Functor> )
     {
         auto const & __restrict in_functor( *functor_ptr( in_buffer ) );
         assign( in_functor, Buffer::from_base( out_buffer ), dummy_allocator() );
     }
 
-    static void BOOST_CC_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept( std::is_nothrow_move_constructible<Functor>::value )
+    static void BOOST_CC_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer )
+#if !( defined( _MSC_VER ) && _MSC_VER == 1927 ) // VS 16.7
+        noexcept( std::is_nothrow_move_constructible_v<Functor> )
+#endif // VS 16.7
     {
         auto & __restrict in_functor( *functor_ptr( in_buffer ) );
         assign( std::move( in_functor ), Buffer::from_base( out_buffer ), dummy_allocator() );
         destroy( in_buffer );
     }
 
-    static void BOOST_CC_FASTCALL destroy( function_buffer_base & buffer ) noexcept ( std::is_nothrow_destructible<Functor>::value )
+    static void BOOST_CC_FASTCALL destroy( function_buffer_base & buffer ) noexcept ( std::is_nothrow_destructible_v<Functor> )
     {
         auto & __restrict functor( *functor_ptr( buffer ) );
         functor.~Functor();
@@ -387,19 +397,18 @@ public:
 	template <typename F>
     static void assign( F && functor, function_buffer_base & out_buffer, OriginalAllocator source_allocator )
     {
-        using does_not_need_guard_t = std::integral_constant
-        <
-            bool,
-			std::is_nothrow_copy_constructible<Functor          >::value &&
-			std::is_nothrow_copy_constructible<OriginalAllocator>::value
-        >;
+        auto constexpr does_not_need_guard
+        {
+            std::is_nothrow_copy_constructible_v<Functor          > &&
+            std::is_nothrow_copy_constructible_v<OriginalAllocator>
+        };
 
-        using guard_t = typename std::conditional
+        using guard_t = std::conditional_t
         <
-			does_not_need_guard_t::value,
+            does_not_need_guard,
 			functor_and_allocator_t *,
 			std::unique_ptr<functor_and_allocator_t>
-        >::type;
+        >;
         assign_aux<guard_t>( std::forward<F>( functor ), out_buffer, source_allocator );
     }
 
@@ -414,7 +423,10 @@ public:
         manager_trivial_heap<OriginalAllocator>::move( std::move( in_buffer ), out_buffer );
     }
 
-    static void BOOST_CC_FASTCALL destroy( function_buffer_base & buffer ) noexcept( std::is_nothrow_destructible<Functor>::value )
+    static void BOOST_CC_FASTCALL destroy( function_buffer_base & buffer )
+#   if !( defined( _MSC_VER ) && _MSC_VER == 1927 ) // VS 16.7
+        noexcept( std::is_nothrow_destructible_v<Functor> )
+#   endif
     {
         functor_and_allocator_t & __restrict in_functor_and_allocator( *functor_ptr( buffer ) );
 
@@ -437,15 +449,15 @@ private:
     template <typename Guard, typename F>
     static void assign_aux( F && functor, function_buffer_base & out_buffer, OriginalAllocator source_allocator )
     {
-        wrapper_allocator_t   full_allocator     ( source_allocator );
-        allocator_allocator_t allocator_allocator( source_allocator );
+        wrapper_allocator_t   full_allocator     { source_allocator };
+        allocator_allocator_t allocator_allocator{ source_allocator };
 
-        Guard                     p_placeholder          ( full_allocator.allocate( 1 ) );
-        Functor           * const p_functor_placeholder  ( &*p_placeholder );
-        OriginalAllocator * const p_allocator_placeholder( &*p_placeholder );
+        Guard                                    p_placeholder          { full_allocator.allocate( 1 ) };
+        std::remove_reference_t<Functor> * const p_functor_placeholder  { &*p_placeholder };
+        OriginalAllocator                * const p_allocator_placeholder{ &*p_placeholder };
 
         source_allocator   .construct( p_functor_placeholder  , std::forward<F>( functor ) );
-        allocator_allocator.construct( p_allocator_placeholder, source_allocator );
+        allocator_allocator.construct( p_allocator_placeholder, source_allocator           );
 
         //...zzz...functor_ptr( out_buffer ) = release( p_placeholder );
         out_buffer.trivial_heap_obj.ptr = release( p_placeholder );
@@ -471,13 +483,13 @@ struct functor_manager_aux
 template <typename Functor, typename Allocator, typename Buffer>
 struct functor_manager_aux<Functor, Allocator, Buffer, true, false, false, true>
 {
-    using type = typename std::conditional
+    using type = std::conditional_t
 	<
 		//...zzz...is_stateless<Allocator>,
-		std::is_empty<Allocator>::value,
+		std::is_empty_v<Allocator>,
 		manager_trivial_heap<         Allocator>,
 		manager_generic     <Functor, Allocator>
-	>::type;
+	>;
 };
 
 template <typename Functor, typename Allocator, typename Buffer, bool defaultAligned>
@@ -598,7 +610,8 @@ template <>
 struct cloner<support_level::trivial>
 {
     constexpr cloner( void const * ) noexcept {}
-    static void BOOST_CC_FASTCALL clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept { out_buffer = in_buffer; }
+    template <typename Buffer>
+    static void BOOST_CC_FASTCALL clone( Buffer const & __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept { out_buffer = in_buffer; }
 };
 template <>
 struct cloner<support_level::na> { constexpr cloner( void const * ) noexcept {} };
@@ -613,12 +626,15 @@ template <>
 struct mover<support_level::trivial>
 {
     constexpr mover( void const * ) noexcept {}
-    static void BOOST_CC_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept { cloner<support_level::trivial>::clone( in_buffer, out_buffer ); }
+    template <typename Buffer>
+    static void BOOST_CC_FASTCALL move( Buffer && __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept { cloner<support_level::trivial>::clone( in_buffer, out_buffer ); }
 };
 template <>
 struct mover<support_level::na> { constexpr mover( void const * ) noexcept {} };
 
-template <typename ActualFunctor, typename StoredFunctor, typename FunctorManager> class functor_type_info;
+template <typename ActualFunctor, typename StoredFunctor, typename FunctorManager>
+class functor_type_info;
+
 template <bool enabled>
 struct reflector
 {
@@ -682,37 +698,36 @@ struct mover<support_level::nofail>
 {
     void (BOOST_CC_FASTCALL * const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) BOOST_AUX_NOEXCEPT_PTR( true ); // more MSVC noexcept( <expr> ) brainfarts
     template <typename Manager> constexpr mover( Manager const * ) noexcept : move( &Manager::move )
-    { static_assert( noexcept( Manager::move( std::declval<function_buffer_base &&>(), std::declval<function_buffer_base &>() ) ) ); }
+    {
+#   if !( defined( _MSC_VER ) && _MSC_VER == 1927 ) // VS 16.7
+        static_assert( noexcept( Manager::move( std::declval<function_buffer_base &&>(), std::declval<function_buffer_base &>() ) ) );
+#   endif
+    }
 };
 #undef BOOST_AUX_NOEXCEPT_PTR
 #endif // conditional noexcept mess workarounds
 
 
-template <typename Invoker, typename Traits>
 // Implementation note:
-//   To test whether a functionoid instance is empty a simple check whether
-// the current vtable pointer points to the vtable for the current empty
-// handler vtable is not good enough for applications that use DLLs
-// (or equivalents) and pass boost::function<> instances across shared
-// module boundaries. In such circumstances one can create an empty
-// boost::function<> instance in module A, where it will get initialised
-// with a vtable pointer pointing to the empty handler vtable stored in
-// that module, pass it on to module B which will then query it whether
-// it is empty at which point the function<> instance will incorrectly
-// return false because it will compare its vtable pointer with the
-// address of the empty handler vtable for module B. This comparison will
-// obviously result in not-equal yielding the incorrect result.
-//   Because of the above, 'is empty' information is additionally stored
-// in the vtable. For this an additional bool data member is added. The
-// alternative would be to mangle/'tag' the vtable pointer but this would
-// actually add much more overhead (in both size and speed) because of
-// the inline-replicated demangling code. Mangling only a single, least
-// often used function pointer from the vtable is also no-good because it
-// would require functions-are-at-least-even-aligned assumption to hold
-// which need not be the case.
-//                                      (01.11.2010.) (Domagoj Saric)
-struct vtable
+//  A "generic typed/void() invoker pointer is also stored in the vtable so
+// that it can (more easily) be placed at the beginning of the vtable so
+// that a vtable pointer would actually point directly to it (thus
+// avoiding pointer offset calculation on invocation).
+//  This also gives a unique/non-template vtable that can be held by
+// callable_base entirely but it also opens a window for erroneous vtable
+// copying/assignment between different callable<> instantiations.
+// A typed wrapper should therefor be added to the callable<>
+// class to catch such errors at compile-time.
+//                                      (xx.xx.2009.) (Domagoj Saric)
+
+template <typename Invoker, typename Traits>
+struct
+#ifdef _MSC_VER
+__declspec( empty_bases )
+#endif // MSVC 16.6 still does not have 'proper'/'automatic' EBO https://developercommunity.visualstudio.com/content/problem/561677/empty-base-class-optimization-causes-first-derived.html
+vtable
     :
+    // update compatible_vtables() if you change this
     Invoker,
     destroyer    <Traits::destructor          >,
     mover        <Traits::moveable            >,
@@ -731,23 +746,36 @@ struct vtable
 		empty_checker<Traits::dll_safe_empty_check>( is_empty_handler )
     {}
 
+    // Implementation note:
+    //   To test whether a functionoid instance is empty a simple check whether
+    // the current vtable pointer points to the vtable for the current empty
+    // handler vtable is not good enough for applications that use DLLs
+    // (or equivalents) and pass callable<> instances across shared
+    // module boundaries. In such circumstances one can create an empty
+    // callable<> instance in module A, where it will get initialised
+    // with a vtable pointer pointing to the empty handler vtable stored in
+    // that module, pass it on to module B which will then query it whether
+    // it is empty at which point the function<> instance will incorrectly
+    // return false because it will compare its vtable pointer with the
+    // address of the empty handler vtable for module B. This comparison will
+    // obviously result in not-equal yielding the incorrect result.
+    //   Because of the above, 'is empty' information is additionally stored
+    // in the vtable. For this an additional bool data member is added. The
+    // alternative would be to mangle/'tag' the vtable pointer but this would
+    // actually add much more overhead (in both size and speed) because of
+    // the inline-replicated demangling code. Mangling only a single, least
+    // often used function pointer from the vtable is also no-good because it
+    // would require functions-are-at-least-even-aligned assumption to hold
+    // which need not be the case.
+    //                                      (01.11.2010.) (Domagoj Saric)
     bool is_empty_handler_vtable( void const * const p_empty_handler_vtable ) const noexcept { return empty_checker<Traits::dll_safe_empty_check>::is_empty_handler_vtable( this, p_empty_handler_vtable ); }
 
-    // Implementation note:
-    //  The "generic typed/void() invoker pointer is also stored here so
-    // that it can (more easily) be placed at the beginning of the vtable so
-    // that a vtable pointer would actually point directly to it (thus
-    // avoiding pointer offset calculation on invocation).
-    //  This also gives a unique/non-template vtable that can be held by
-    // function_base entirely but it also opens a window for erroneous vtable
-    // copying/assignment between different boost::function<> instantiations.
-    // A typed wrapper should therefor be added to the boost::function<>
-    // class to catch such errors at compile-time.
-    //                                      (xx.xx.2009.) (Domagoj Saric)
     using base_vtable = vtable<invoker<true, void>, Traits>;
     operator base_vtable const & () const noexcept { return reinterpret_cast<base_vtable const &>( *this ); }
 }; // struct vtable
 
+template <typename Traits>
+using base_vtable = vtable<invoker<true, void>, Traits>;
 
 template <typename T>
 T get_default_value( std::false_type /*not a reference type*/ ) { return {}; }
@@ -758,7 +786,7 @@ inline void get_default_value<void>( std::false_type /*not a reference type*/ ) 
 template <typename T>
 T get_default_value( std::true_type /*a reference type*/ )
 {
-    using actual_type_t = typename std::remove_reference<T>::type;
+    using actual_type_t = std::remove_reference_t<T>;
     static T invalid_reference( *static_cast<actual_type_t *>( 0 ) );
     return invalid_reference;
 }
@@ -781,15 +809,19 @@ public:
         return get_vtable().get_typed_functor( this->functor_ ).functor_type_info();
     }
 
+    template <typename Functor> Functor const * target() const noexcept { return const_cast<callable_base &>( *this ).target<Functor const>(); }
     template <typename Functor> Functor       * target()       noexcept
-#ifdef __clang__
-    __attribute__(( no_sanitize( "function" ) ))
-#endif
+    BOOST_AUX_NO_SANITIZE
     {
         return get_vtable().get_typed_functor( this->functor_ ). template target<Functor>();
     }
 
-    template <typename Functor> Functor const * target() const noexcept { return const_cast<callable_base &>( *this ).target<Functor const>(); }
+    template <typename Functor>
+    Functor & target_as() noexcept // unchecked version of target
+    {
+        static_assert( sizeof( Functor ) <= sizeof( this->functor_ ) );
+        return reinterpret_cast< Functor & >( this->functor_ );
+    }
 
     template <typename F>
     bool contains( F & f ) const noexcept
@@ -799,8 +831,8 @@ public:
     }
 
 protected:
+    using base_vtable = base_vtable<Traits>;
     using buffer      = function_buffer<Traits::sbo_size, Traits::sbo_alignment>;
-	using base_vtable = vtable<invoker<true, void>, Traits>;
 
 private: // Private helper guard classes.
 	// This needs to be a template only to support stateful empty handlers.
@@ -868,10 +900,6 @@ protected:
     template <typename Constructor, typename ... Args>
     callable_base( no_eh_state_construction_trick_tag, Constructor const constructor, Args && ... args ) noexcept( noexcept( constructor( std::declval<callable_base &>(), std::forward<Args>( args )... ) ) )
     {
-    #if !BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1914 ) )
-        // workaround for VS 2017 15.7 "'boost::functionoid::detail::vtable': illegal use of this type as an expression" dubious error
-        [[maybe_unused]]
-    #endif
         auto const & vtable( constructor( *this, std::forward<Args>( args )... ) );
         BOOST_ASSUME( p_vtable_ == &vtable );
     }
@@ -928,22 +956,35 @@ protected:
 	void assign
 	(
 		FunctionObj       && f,
+        [[ maybe_unused ]]
 		base_vtable const &  functor_vtable,
 		base_vtable const &  empty_handler_vtable,
 		Allocator,
-		std::true_type /*assignment of an instance of the same callable instantiation*/
+		std::true_type // assignment of an instance of a callable (with possibly different traits)
 	)
 	{
-		BOOST_ASSERT( &functor_vtable == f.p_vtable_ );
-		ignore_unused( functor_vtable );
-		if ( direct )
+        auto const same_traits{ std::is_convertible_v<std::decay_t<FunctionObj> *, callable_base const *> };
+        if constexpr ( same_traits )
+        {
+		    BOOST_ASSUME( &functor_vtable == f.p_vtable_ );
+        }
+		if constexpr ( direct )
 		{
-			BOOST_ASSERT( &static_cast<callable_base const &>( f ) != this );
-			BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable || /*just being constructed/inside a no_eh_state_construction_trick constructor in a debug build:*/ this->p_vtable_ == invalid_ptr );
+		    BOOST_ASSUME( &f != static_cast<callable_tag const *>( this ) );
+			BOOST_ASSERT
+            (
+                ( this->p_vtable_ == &empty_handler_vtable ) ||
+                // just being constructed/inside a no_eh_state_construction_trick constructor in a debug build:
+                ( this->p_vtable_ == invalid_ptr )
+            );
 			assign_functionoid_direct( std::forward<FunctionObj>( f ), empty_handler_vtable );
 		}
-		else if ( &static_cast<callable_base const &>( f ) != this )
+		else
 		{
+            // guard against self-assignment where pre-destruction could 'bug up' the process
+            if constexpr ( same_traits && ( Traits::destructor != support_level::trivial ) )
+                if ( BOOST_UNLIKELY( &f == this ) )
+                    return;
 			assign_functionoid_guarded<EmptyHandler>( std::forward<FunctionObj>( f ), empty_handler_vtable );
 		}
 	}
@@ -988,7 +1029,7 @@ protected:
 		// This most generic case needs to be reworked [currently does redundant
 		// copying (through the vtable function pointers) and does not use all
 		// the type information it could...]...
-		using functor_manager = functor_manager<F, Allocator, buffer>;
+		using functor_manager = functor_manager<std::remove_reference_t<F>, Allocator, buffer>;
 		callable_base tmp( empty_handler_vtable, EmptyHandler() );
 		functor_manager::assign( std::forward<F>( f ), tmp.functor_, a );
 		tmp.p_vtable_ = &functor_vtable;
@@ -997,60 +1038,123 @@ protected:
 
 private: // Assignment from another functionoid helpers.
 	void assign_functionoid_direct( callable_base const & source, base_vtable const & /*empty_handler_vtable*/ ) noexcept( Traits::copyable >= support_level::nofail )
-#ifdef __clang__
-    __attribute__(( no_sanitize( "function" ) ))
-#endif
+    BOOST_AUX_NO_SANITIZE
 	{
+        static_assert( Traits::copyable != support_level::na, "Callable not copyable" );
 		source.get_vtable().clone( source.functor_, this->functor_ );
 		p_vtable_ = &source.get_vtable();
 	}
 
 	void assign_functionoid_direct( callable_base && source, base_vtable const & empty_handler_vtable ) noexcept( ( Traits::moveable >= support_level::nofail ) || ( Traits::moveable == support_level::na && Traits::copyable >= support_level::nofail ) )
 	{
-        source.move_to( *this, std::integral_constant<bool, Traits::moveable != support_level::na>() );
+        source.move_to( *this, std::integral_constant<bool, Traits::moveable != support_level::na>{} );
 		this ->p_vtable_ = &source.get_vtable();
 		source.p_vtable_ = &empty_handler_vtable;
+	}
+
+    static constexpr bool compatible_vtable_function_entry( support_level const me, support_level const other ) noexcept
+    {
+        using level = support_level;
+
+        bool compatible{ me == other };
+        if ( !compatible )
+        {
+            switch ( me )
+            {
+                case level::supported: compatible = ( other != level::na      ) && ( other != level::trivial ); break; // trivial does not use/provide a pointer
+              //case level::nofail   : compatible = ( other == level::trivial ); break; // trivial does not use/provide a pointer
+                case level::na       : compatible = ( other == level::trivial ); break; // trivial also does not use/'allocate' a function pointer
+            }
+        }
+        return compatible;
+    }
+
+    template <typename OtherTraits>
+    static constexpr bool compatible_vtables() noexcept
+    {
+        // vtable pointer order
+        // invoker
+        // destroyer
+        // mover
+        // cloner
+        // reflector
+        // empty_checker
+
+        using level = support_level;
+
+        auto const destroy_matches{ compatible_vtable_function_entry( Traits::destructor, OtherTraits::destructor ) };
+        auto          move_matches{ compatible_vtable_function_entry( Traits::moveable  , OtherTraits::moveable   ) };
+        auto          copy_matches{ compatible_vtable_function_entry( Traits::copyable  , OtherTraits::copyable   ) };
+
+        if ( !copy_matches && !move_matches )
+        {
+            auto const swappable
+            {
+                compatible_vtable_function_entry( Traits::moveable, OtherTraits::copyable ) &&
+                compatible_vtable_function_entry( Traits::copyable, OtherTraits::moveable )
+            };
+
+            copy_matches = move_matches = swappable;
+        }
+
+        return destroy_matches && move_matches && copy_matches &&
+            ( OtherTraits::is_noexcept >= Traits::is_noexcept ) &&
+            ( OtherTraits::rtti == Traits::rtti || ( !Traits::rtti && !Traits::dll_safe_empty_check ) ) && // second part -> means the rest of the vtable is ignored/not used by this callable
+            ( OtherTraits::dll_safe_empty_check >= Traits::dll_safe_empty_check );
+    }
+
+    template <typename OtherTraits>
+    void assign_functionoid_direct( callable_base<OtherTraits> const & source, base_vtable const & /*empty_handler_vtable*/ ) noexcept( OtherTraits::copyable >= support_level::nofail )
+    BOOST_AUX_NO_SANITIZE
+	{
+        static_assert( compatible_vtables<OtherTraits>() );
+        static_assert( Traits::sbo_size      >= OtherTraits::sbo_size      );
+        static_assert( Traits::sbo_alignment >= OtherTraits::sbo_alignment );
+
+        static_assert( ( OtherTraits::copyable != support_level::na ) || ( OtherTraits::moveable == support_level::trivial ), "Not copyable" );
+
+        if constexpr ( OtherTraits::copyable != support_level::na )
+		    source.get_vtable().clone( source.functor_, reinterpret_cast< typename callable_base<OtherTraits>::buffer & >( this->functor_ ) );
+        else
+        if constexpr ( OtherTraits::moveable == support_level::trivial )
+            source.get_vtable().move( source.functor_, reinterpret_cast< typename callable_base<OtherTraits>::buffer & >( this->functor_ ) );
+
+        auto & source_vtable{ source.get_vtable() } ;
+        static_assert( sizeof( *p_vtable_ ) == sizeof( source_vtable ) );
+		p_vtable_ = reinterpret_cast<base_vtable const *>( &source_vtable );
 	}
 
 	template <typename EmptyHandler, typename FunctionBaseRef>
 	void assign_functionoid_guarded( FunctionBaseRef && source, base_vtable const & empty_handler_vtable )
 	{
-		this->destroy();
+		destroy();
 		cleaner<EmptyHandler> guard( *this, empty_handler_vtable );
 		assign_functionoid_direct( std::forward<FunctionBaseRef>( source ), empty_handler_vtable );
 		guard.cancel();
 	}
 
-	void destroy() noexcept
-    #ifdef __clang__
-        __attribute__(( no_sanitize( "function" ) ))
-    #endif
-    {
-        get_vtable().destroy( this->functor_ );
-    }
+    // It is safe to unconditionally call destroy on an empty callable as the
+    // empty handler's vtable will correctly handle it.
+	void destroy() noexcept BOOST_AUX_NO_SANITIZE { get_vtable().destroy( this->functor_ ); }
 
     void move_to( callable_base & destination, std::true_type  /*    has move*/ ) const noexcept( Traits::moveable >= support_level::nofail )
-    #ifdef __clang__
-        __attribute__(( no_sanitize( "function" ) ))
-    #endif
+    BOOST_AUX_NO_SANITIZE
     {
         get_vtable().move ( std::move( this->functor_ ), destination.functor_ );
     }
     void move_to( callable_base & destination, std::false_type /*not has move*/ ) const noexcept( Traits::copyable >= support_level::nofail )
-#ifdef __clang__
-    __attribute__(( no_sanitize( "function" ) ))
-#endif
+    BOOST_AUX_NO_SANITIZE
     {
         get_vtable().clone( std::move( this->functor_ ), destination.functor_ );
     }
 
-private:
+private: template <typename OtherTraits> friend class callable_base;
 	class safe_mover_base;
 	template <class EmptyHandler> class safe_mover;
 
-			base_vtable const * p_vtable_;
-	mutable buffer              functor_ ;
-}; // class function_base
+			base_vtable const * __restrict p_vtable_;
+	mutable buffer                         functor_ ;
+}; // class callable_base
 
 #ifdef BOOST_MSVC
 #    pragma warning( pop )
@@ -1060,18 +1164,20 @@ template <typename T>
 BOOST_FORCEINLINE bool has_empty_target( T * const funcPtr, function_ptr_tag ) noexcept { return funcPtr == 0; }
 
 template <typename T>
-BOOST_FORCEINLINE bool has_empty_target_aux( T * const funcPtr, member_ptr_tag ) noexcept { return has_empty_target<T>( funcPtr, function_ptr_tag() ); }
+BOOST_FORCEINLINE bool has_empty_target_aux( T * const funcPtr, member_ptr_tag ) noexcept { return has_empty_target<T>( funcPtr, function_ptr_tag{} ); }
 
-template <class Traits>
-BOOST_FORCEINLINE bool has_empty_target_aux( callable_base<Traits> const * const f, function_obj_tag ) noexcept { BOOST_ASSUME( f != nullptr ); return f->empty(); }
-
-// Some compilers seem unable to inline even trivial vararg functions
-// (e.g. MSVC).
-//inline bool has_empty_target_aux(...)
-constexpr bool has_empty_target_aux( void const * /*f*/, function_obj_tag ) noexcept { return false; }
+template <typename F>
+BOOST_FORCEINLINE bool has_empty_target_aux( F const * const f, function_obj_tag ) noexcept
+{
+    // https://stackoverflow.com/questions/16893992/check-if-type-can-be-explicitly-converted
+    if constexpr ( std::is_constructible_v<bool, F> )
+        return !static_cast<bool>( *f );
+    else
+        return false;
+}
 
 template <typename T>
-BOOST_FORCEINLINE bool has_empty_target( T const & f, function_obj_tag ) noexcept { return has_empty_target_aux( std::addressof( f ), function_obj_tag() ); }
+BOOST_FORCEINLINE bool has_empty_target( T const & f, function_obj_tag ) noexcept { return has_empty_target_aux( std::addressof( f ), function_obj_tag{} ); }
 
 template <class FunctionObj>
 BOOST_FORCEINLINE bool has_empty_target( std::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag ) noexcept
@@ -1080,15 +1186,15 @@ BOOST_FORCEINLINE bool has_empty_target( std::reference_wrapper<FunctionObj> con
     // We save/assign a reference to a functionoid even if it is empty and let
     // the referenced functionoid handle a possible empty invocation.
     //                                        (28.10.2010.) (Domagoj Saric)
-    return std::is_base_of<callable_tag, FunctionObj>::value
+    return std::is_base_of_v<callable_tag, FunctionObj>
         ? false
-        : has_empty_target( f.get(), function_obj_tag() );
+        : has_empty_target( f.get(), function_obj_tag{} );
 }
 
 template <class FunctionObj>
 BOOST_FORCEINLINE bool has_empty_target( boost::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag ) noexcept
 {
-    return has_empty_target( std::cref( f.get() ), function_obj_ref_tag() );
+    return has_empty_target( std::cref( f.get() ), function_obj_ref_tag{} );
 }
 
 template <typename Traits>
@@ -1103,22 +1209,22 @@ protected:
 	~safe_mover_base() = default;
 
 public:
-	safe_mover_base( callable_base & functionToGuard, callable_base & empty_function_to_move_to )
+	safe_mover_base( callable_base & function_to_guard, callable_base & empty_function_to_move_to ) noexcept
 		:
-		p_function_to_restore_to_ ( &functionToGuard                       ),
-		empty_function_to_move_to_( empty_function_to_move_to              ),
-		empty_handler_vtable_     ( empty_function_to_move_to.get_vtable() )
+		p_function_to_restore_to_ { &function_to_guard                     },
+		empty_function_to_move_to_{ empty_function_to_move_to              },
+		empty_handler_vtable_     { empty_function_to_move_to.get_vtable() }
 	{
 		BOOST_ASSERT( empty_function_to_move_to_.p_vtable_ == &empty_handler_vtable_ );
-		move( functionToGuard, empty_function_to_move_to_, empty_handler_vtable_ );
+		move( function_to_guard, empty_function_to_move_to_, empty_handler_vtable_ );
 	}
 
 public:
-	void cancel() { BOOST_ASSERT( p_function_to_restore_to_ ); p_function_to_restore_to_ = 0; }
+	void cancel() noexcept { BOOST_ASSERT( p_function_to_restore_to_ ); p_function_to_restore_to_ = 0; }
 
-	static void move( callable_base & source, callable_base & destination, base_vtable const & empty_handler_vtable )
+	static void move( callable_base & source, callable_base & destination, base_vtable const & empty_handler_vtable ) noexcept
 	{
-        source.move_to( destination, std::integral_constant<bool, Traits::moveable != support_level::na>() );
+        source.move_to( destination, std::integral_constant<bool, Traits::moveable != support_level::na>{} );
 		destination.p_vtable_ = source.p_vtable_;
 		source     .p_vtable_ = &empty_handler_vtable;
 	}
@@ -1164,7 +1270,7 @@ void callable_base<Traits>::swap( callable_base & other, base_vtable const & emp
 
 	my_restorer   .cancel();
 	other_restorer.cancel();
-} // void function_base::swap()
+} // void callable_base::swap()
 
 template <typename Traits>
 template <bool direct, typename EmptyHandler, typename F, typename Allocator>
@@ -1180,7 +1286,7 @@ void callable_base<Traits>::assign
 	using namespace detail;
 
 	using tag = typename get_function_tag<F>::type;
-	if ( has_empty_target( f, tag() ) )
+	if ( has_empty_target( f, tag{} ) )
 		this->clear<direct, EmptyHandler>( empty_handler_vtable );
 	else
 	if constexpr ( direct )
@@ -1191,7 +1297,7 @@ void callable_base<Traits>::assign
         // here.
         //                                    (02.11.2010.) (Domagoj Saric)
         BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable || /*just being constructed/inside a no_eh_state_construction_trick constructor in a debug build:*/ this->p_vtable_ == invalid_ptr );
-		using functor_manager = functor_manager<F, Allocator, buffer>;
+		using functor_manager = functor_manager<std::remove_reference_t<F>, Allocator, buffer>;
 		functor_manager::assign( std::forward<F>( f ), this->functor_, a );
 		this->p_vtable_ = &functor_vtable;
 	}
@@ -1206,7 +1312,7 @@ void callable_base<Traits>::assign
         <
             bool,
 			functor_traits<F, buffer>::allowsSmallObjectOptimization &&
-            std::is_nothrow_assignable<std::remove_reference_t<F>, F>::value
+            std::is_nothrow_assignable_v<std::remove_reference_t<F>, F>
 		>;
 
 		actual_assign<EmptyHandler>
@@ -1215,10 +1321,10 @@ void callable_base<Traits>::assign
 			functor_vtable,
 			empty_handler_vtable,
 			a,
-			has_no_fail_assignement_t()
+            has_no_fail_assignement_t{}
 		);
 	}
-} // void function_base::assign()
+} // void callable_base::assign()
 
 //------------------------------------------------------------------------------
 } // namespace detail
