@@ -822,6 +822,8 @@ public:
         static_assert( sizeof( Functor ) <= sizeof( this->functor_ ) );
         return reinterpret_cast< Functor & >( this->functor_ );
     }
+    template <typename Functor>
+    Functor const & target_as() const noexcept { return const_cast<callable_base &>( *this ).target_as<Functor const>(); }
 
     template <typename F>
     bool contains( F & f ) const noexcept
