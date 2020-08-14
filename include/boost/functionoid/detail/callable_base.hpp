@@ -833,8 +833,8 @@ public:
     }
 
 protected:
-    using base_vtable = base_vtable<Traits>;
-    using buffer      = function_buffer<Traits::sbo_size, Traits::sbo_alignment>;
+    using vtable = base_vtable<Traits>;
+    using buffer = function_buffer<Traits::sbo_size, Traits::sbo_alignment>;
 
 private: // Private helper guard classes.
 	// This needs to be a template only to support stateful empty handlers.
@@ -842,7 +842,7 @@ private: // Private helper guard classes.
 	class cleaner
 	{
 	public:
-		cleaner( callable_base & function, base_vtable const & empty_handler_vtable )
+		cleaner( callable_base & function, vtable const & empty_handler_vtable )
 			:
 			p_function_          ( &function            ),
 			empty_handler_vtable_( empty_handler_vtable )
@@ -874,25 +874,25 @@ private: // Private helper guard classes.
 
 	private:
 		callable_base       * p_function_;
-		base_vtable   const & empty_handler_vtable_;
+		vtable        const & empty_handler_vtable_;
 	}; // class cleaner
 
 protected:
 	callable_base() noexcept { debug_clear( *this ); }
-	callable_base( callable_base const & other, base_vtable const & empty_handler_vtable )
+    callable_base( callable_base const & other, vtable const & empty_handler_vtable )
 	{
 		debug_clear( *this );
 		assign_functionoid_direct( other, empty_handler_vtable );
 	}
 
-	callable_base( callable_base && other, base_vtable const & empty_handler_vtable ) noexcept
+	callable_base( callable_base && other, vtable const & empty_handler_vtable ) noexcept
 	{
 		debug_clear( *this );
 		assign_functionoid_direct( std::move( other ), empty_handler_vtable );
 	}
 
 	template <class EmptyHandler>
-	callable_base( base_vtable const & empty_handler_vtable, EmptyHandler ) noexcept
+	callable_base( vtable const & empty_handler_vtable, EmptyHandler ) noexcept
 	{
 		debug_clear( *this );
 		this->clear<true, EmptyHandler>( empty_handler_vtable );
@@ -909,7 +909,7 @@ protected:
 	~callable_base() noexcept { destroy(); }
 
 	template <class EmptyHandler>
-	void swap( callable_base & other, base_vtable const & empty_handler_vtable ) noexcept;
+	void swap( callable_base & other, vtable const & empty_handler_vtable ) noexcept;
 
 protected:
     bool empty( void const * const p_empty_handler_vtable ) const noexcept { return get_vtable().is_empty_handler_vtable( p_empty_handler_vtable ); }
@@ -918,7 +918,7 @@ protected:
     /// for basic functionality (such as empty(), clear() and operator()()) w/o
     /// requiring an additional std::atomic<bool> is_my_functionoid_set-like
     /// variable.
-    /// Making the vtable pointer a std::atomic<base_vtable const *> is not an
+    /// Making the vtable pointer a std::atomic<vtable const *> is not an
     /// option currently because even with std::memory_order_relaxed access the
     /// variable is accessed 'like a volatile' which produces bad codegen (e.g.
     /// it is reread from memory for every access).
@@ -938,7 +938,7 @@ protected:
 	buffer & functor() const noexcept { return functor_; }
 
 	template <bool direct, class EmptyHandler>
-	void clear( base_vtable const & empty_handler_vtable ) noexcept
+	void clear( vtable const & empty_handler_vtable ) noexcept
 	{
 		// For stateless empty handlers a full assign is not necessary here
 		// but a simple this->p_vtable_ = &empty_handler_vtable...
@@ -959,8 +959,8 @@ protected:
 	(
 		FunctionObj       && f,
         [[ maybe_unused ]]
-		base_vtable const &  functor_vtable,
-		base_vtable const &  empty_handler_vtable,
+		vtable      const &  functor_vtable,
+		vtable      const &  empty_handler_vtable,
 		Allocator,
 		std::true_type // assignment of an instance of a callable (with possibly different traits)
 	)
@@ -996,8 +996,8 @@ protected:
 	void assign
 	(
 		FunctionObj       && f,
-		base_vtable const &  functor_vtable,
-		base_vtable const &  empty_handler_vtable,
+		vtable      const &  functor_vtable,
+		vtable      const &  empty_handler_vtable,
 		Allocator,
 		std::false_type /*generic assign*/
 	);
@@ -1005,10 +1005,10 @@ protected:
 	template <typename EmptyHandler, typename F, typename Allocator>
 	void actual_assign
 	(
-		F                 &&      f,
-		base_vtable const &       functor_vtable,
-		base_vtable const &     /*empty_handler_vtable*/,
-		Allocator           const a,
+		F               &&      f,
+		vtable    const &       functor_vtable,
+		vtable    const &     /*empty_handler_vtable*/,
+		Allocator         const a,
 		std::true_type /*can use direct assign*/
 	) noexcept
 	{
@@ -1021,10 +1021,10 @@ protected:
 	template <typename EmptyHandler, typename F, typename Allocator>
 	void actual_assign
 	(
-		F                 &&       f,
-		base_vtable const &        functor_vtable,
-		base_vtable const &        empty_handler_vtable,
-		Allocator            const a,
+		F               &&       f,
+		vtable    const &        functor_vtable,
+		vtable    const &        empty_handler_vtable,
+		Allocator          const a,
 		std::false_type /*must use safe assignment*/
 	)
 	{
@@ -1039,7 +1039,7 @@ protected:
 	}
 
 private: // Assignment from another functionoid helpers.
-	void assign_functionoid_direct( callable_base const & source, base_vtable const & /*empty_handler_vtable*/ ) noexcept( Traits::copyable >= support_level::nofail )
+	void assign_functionoid_direct( callable_base const & source, vtable const & /*empty_handler_vtable*/ ) noexcept( Traits::copyable >= support_level::nofail )
     BOOST_AUX_NO_SANITIZE
 	{
         static_assert( Traits::copyable != support_level::na, "Callable not copyable" );
@@ -1047,7 +1047,7 @@ private: // Assignment from another functionoid helpers.
 		p_vtable_ = &source.get_vtable();
 	}
 
-	void assign_functionoid_direct( callable_base && source, base_vtable const & empty_handler_vtable ) noexcept( ( Traits::moveable >= support_level::nofail ) || ( Traits::moveable == support_level::na && Traits::copyable >= support_level::nofail ) )
+	void assign_functionoid_direct( callable_base && source, vtable const & empty_handler_vtable ) noexcept( ( Traits::moveable >= support_level::nofail ) || ( Traits::moveable == support_level::na && Traits::copyable >= support_level::nofail ) )
 	{
         source.move_to( *this, std::integral_constant<bool, Traits::moveable != support_level::na>{} );
 		this ->p_vtable_ = &source.get_vtable();
@@ -1106,7 +1106,7 @@ private: // Assignment from another functionoid helpers.
     }
 
     template <typename OtherTraits>
-    void assign_functionoid_direct( callable_base<OtherTraits> const & source, base_vtable const & /*empty_handler_vtable*/ ) noexcept( OtherTraits::copyable >= support_level::nofail )
+    void assign_functionoid_direct( callable_base<OtherTraits> const & source, vtable const & /*empty_handler_vtable*/ ) noexcept( OtherTraits::copyable >= support_level::nofail )
     BOOST_AUX_NO_SANITIZE
 	{
         static_assert( compatible_vtables<OtherTraits>() );
@@ -1123,11 +1123,11 @@ private: // Assignment from another functionoid helpers.
 
         auto & source_vtable{ source.get_vtable() } ;
         static_assert( sizeof( *p_vtable_ ) == sizeof( source_vtable ) );
-		p_vtable_ = reinterpret_cast<base_vtable const *>( &source_vtable );
+		p_vtable_ = reinterpret_cast<vtable const *>( &source_vtable );
 	}
 
 	template <typename EmptyHandler, typename FunctionBaseRef>
-	void assign_functionoid_guarded( FunctionBaseRef && source, base_vtable const & empty_handler_vtable )
+	void assign_functionoid_guarded( FunctionBaseRef && source, vtable const & empty_handler_vtable )
 	{
 		destroy();
 		cleaner<EmptyHandler> guard( *this, empty_handler_vtable );
@@ -1154,8 +1154,8 @@ private: template <typename OtherTraits> friend class callable_base;
 	class safe_mover_base;
 	template <class EmptyHandler> class safe_mover;
 
-			base_vtable const * __restrict p_vtable_;
-	mutable buffer                         functor_ ;
+			vtable const * __restrict p_vtable_;
+	mutable buffer                    functor_ ;
 }; // class callable_base
 
 #ifdef BOOST_MSVC
@@ -1203,12 +1203,12 @@ template <typename Traits>
 class callable_base<Traits>::safe_mover_base
 {
 protected:
-	using functor     = typename callable_base<Traits>::buffer     ;
-	using base_vtable = typename callable_base<Traits>::base_vtable;
+	using functor = typename callable_base<Traits>::buffer;
+	using vtable  = typename callable_base<Traits>::vtable;
 
 protected:
 	safe_mover_base( safe_mover_base const & ) = delete;
-	~safe_mover_base() = default;
+   ~safe_mover_base() = default;
 
 public:
 	safe_mover_base( callable_base & function_to_guard, callable_base & empty_function_to_move_to ) noexcept
@@ -1224,7 +1224,7 @@ public:
 public:
 	void cancel() noexcept { BOOST_ASSERT( p_function_to_restore_to_ ); p_function_to_restore_to_ = 0; }
 
-	static void move( callable_base & source, callable_base & destination, base_vtable const & empty_handler_vtable ) noexcept
+	static void move( callable_base & source, callable_base & destination, vtable const & empty_handler_vtable ) noexcept
 	{
         source.move_to( destination, std::integral_constant<bool, Traits::moveable != support_level::na>{} );
 		destination.p_vtable_ = source.p_vtable_;
@@ -1234,7 +1234,7 @@ public:
 protected:
 	callable_base       * __restrict p_function_to_restore_to_ ;
 	callable_base       & __restrict empty_function_to_move_to_;
-	base_vtable   const & __restrict empty_handler_vtable_     ;
+	vtable        const & __restrict empty_handler_vtable_     ;
 }; // safe_mover_base
 
 // ...if the is_stateless<EmptyHandler> requirement sticks this will not need
@@ -1258,7 +1258,7 @@ public:
 
 template <class Traits>
 template <class EmptyHandler>
-void callable_base<Traits>::swap( callable_base & other, base_vtable const & empty_handler_vtable ) noexcept
+void callable_base<Traits>::swap( callable_base & other, vtable const & empty_handler_vtable ) noexcept
 {
 	if ( &other == this )
 		return;
@@ -1278,10 +1278,10 @@ template <typename Traits>
 template <bool direct, typename EmptyHandler, typename F, typename Allocator>
 void callable_base<Traits>::assign
 (
-	F                 &&       f,
-	base_vtable const &        functor_vtable,
-	base_vtable const &        empty_handler_vtable,
-	Allocator            const a,
+	F               &&       f,
+	vtable    const &        functor_vtable,
+	vtable    const &        empty_handler_vtable,
+	Allocator          const a,
 	std::false_type /*generic assign*/
 )
 {

@@ -66,7 +66,7 @@ private: // Private implementation types.
         }
     };
 
-    using base_vtable = typename detail::callable_base<Traits>::base_vtable;
+    using base_vtable = typename detail::callable_base<Traits>::vtable;
     using vtable_type = detail::vtable<detail::invoker<Traits::is_noexcept, ReturnType, Arguments...>, Traits>;
 
     /// \note
