@@ -1064,8 +1064,10 @@ private: // Assignment from another functionoid helpers.
             switch ( me )
             {
                 case level::supported: compatible = ( other != level::na      ) && ( other != level::trivial ); break; // trivial does not use/provide a pointer
-              //case level::nofail   : compatible = ( other == level::trivial ); break; // trivial does not use/provide a pointer
-                case level::na       : compatible = ( other == level::trivial ); break; // trivial also does not use/'allocate' a function pointer
+                case level::na       : compatible = ( other == level::trivial );                                break; // trivial also does not use/'allocate' a function pointer
+                // silence warnings
+                case level::nofail   : [[ fallthrough ]]; //compatible = ( other == level::trivial ); break; // trivial does not use/provide a pointer
+                case level::trivial  : break;
             }
         }
         return compatible;
@@ -1081,8 +1083,6 @@ private: // Assignment from another functionoid helpers.
         // cloner
         // reflector
         // empty_checker
-
-        using level = support_level;
 
         auto const destroy_matches{ compatible_vtable_function_entry( Traits::destructor, OtherTraits::destructor ) };
         auto          move_matches{ compatible_vtable_function_entry( Traits::moveable  , OtherTraits::moveable   ) };
