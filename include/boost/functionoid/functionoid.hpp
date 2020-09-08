@@ -221,6 +221,18 @@ private:
             std::is_same<StoredFunctor, my_empty_handler>::value
         );
 
+        static_assert
+        (
+            std::is_copy_constructible_v<StoredFunctor> || Traits::copyable == support_level::na,
+            "This callable instantiation requires copyable targets."
+        );
+
+        static_assert
+        (
+            std::is_nothrow_copy_constructible_v<StoredFunctor> || ( Traits::copyable == support_level::na || Traits::copyable == support_level::supported ),
+            "This callable instantiation requires nothrow copy constructible targets."
+        );
+
         using invoker_type = invoker<Traits::is_noexcept, ReturnType, Arguments...>;
 
         // Note: it is extremely important that this initialization uses
@@ -290,12 +302,6 @@ private:
     template <bool direct, typename ActualFunctor, typename StoredFunctor, typename ActualFunctorAllocator>
     void do_assign( ActualFunctor const &, StoredFunctor && stored_functor, ActualFunctorAllocator const a )
     {
-        static_assert
-        (
-            Traits::copyable == support_level::na || std::is_copy_constructible_v<StoredFunctor>,
-            "This callable instantiation requires copyable function objects."
-        );
-
 		using NakedStoredFunctor     = std::remove_const_t<std::remove_reference_t<StoredFunctor>>;
         using StoredFunctorAllocator = typename std::allocator_traits<ActualFunctorAllocator>::template rebind_alloc<NakedStoredFunctor>;
         function_base:: template assign<direct, empty_handler>
