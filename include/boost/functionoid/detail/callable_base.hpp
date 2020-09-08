@@ -342,7 +342,10 @@ struct manager_small
         new ( functor_ptr( out_buffer ) ) Functor( std::forward<F>( functor ) );
     }
 
-    static void BOOST_CC_FASTCALL clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer ) noexcept( std::is_nothrow_copy_constructible_v<Functor> )
+    static void BOOST_CC_FASTCALL clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer )
+#if !( defined( _MSC_VER ) && _MSC_VER == 1927 ) // VS 16.7
+        noexcept( std::is_nothrow_copy_constructible_v<Functor> )
+#endif // VS 16.7
     {
         auto const & __restrict in_functor( *functor_ptr( in_buffer ) );
         assign( in_functor, Buffer::from_base( out_buffer ), dummy_allocator() );
@@ -358,7 +361,10 @@ struct manager_small
         destroy( in_buffer );
     }
 
-    static void BOOST_CC_FASTCALL destroy( function_buffer_base & buffer ) noexcept ( std::is_nothrow_destructible_v<Functor> )
+    static void BOOST_CC_FASTCALL destroy( function_buffer_base & buffer )
+#if !( defined( _MSC_VER ) && _MSC_VER == 1927 ) // VS 16.7
+        noexcept ( std::is_nothrow_destructible_v<Functor> )
+#endif // VS 16.7
     {
         auto & __restrict functor( *functor_ptr( buffer ) );
         functor.~Functor();
@@ -434,10 +440,10 @@ public:
         allocator_allocator_t allocator_allocator( in_functor_and_allocator.allocator() );
         wrapper_allocator_t   full_allocator     ( in_functor_and_allocator.allocator() );
 
-        original_allocator .destroy( original_allocator .address( in_functor_and_allocator.functor  () ) );
-        allocator_allocator.destroy( allocator_allocator.address( in_functor_and_allocator.allocator() ) );
+        std::allocator_traits<OriginalAllocator    >::destroy( original_allocator , std::addressof( in_functor_and_allocator.functor  () ) );
+        std::allocator_traits<allocator_allocator_t>::destroy( allocator_allocator, std::addressof( in_functor_and_allocator.allocator() ) );
 
-        full_allocator.deallocate( full_allocator.address( in_functor_and_allocator ), 1 );
+        full_allocator.deallocate( std::addressof( in_functor_and_allocator ), 1 );
         debug_clear( buffer );
     }
 
@@ -456,8 +462,8 @@ private:
         std::remove_reference_t<Functor> * const p_functor_placeholder  { &*p_placeholder };
         OriginalAllocator                * const p_allocator_placeholder{ &*p_placeholder };
 
-        source_allocator   .construct( p_functor_placeholder  , std::forward<F>( functor ) );
-        allocator_allocator.construct( p_allocator_placeholder, source_allocator           );
+        std::allocator_traits<OriginalAllocator    >::construct( source_allocator   , p_functor_placeholder  , std::forward<F>( functor ) );
+        std::allocator_traits<allocator_allocator_t>::construct( allocator_allocator, p_allocator_placeholder, source_allocator           );
 
         //...zzz...functor_ptr( out_buffer ) = release( p_placeholder );
         out_buffer.trivial_heap_obj.ptr = release( p_placeholder );
@@ -813,6 +819,7 @@ public:
     template <typename Functor> Functor       * target()       noexcept
     BOOST_AUX_NO_SANITIZE
     {
+        static_assert( Traits::rtti, "RTTI not enabled for this callable" );
         return get_vtable().get_typed_functor( this->functor_ ). template target<Functor>();
     }
 
