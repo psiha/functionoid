@@ -160,6 +160,8 @@ public: // Public function interface.
     template <typename F, typename Allocator>
     void assign( F && f, Allocator const a ) { this->do_assign<false>( std::forward<F>( f ), a ); }
 
+    void assign( std::nullptr_t ) noexcept { clear(); }
+
     /// Clear out a target (replace it with an empty handler), if there is one.
     void clear() { function_base:: template clear<false, empty_handler>( empty_handler_vtable() ); }
 
