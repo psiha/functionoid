@@ -538,7 +538,7 @@ using functor_manager = typename functor_manager_aux
 /// are used (instead of const pointers) by generating/storing 'null
 /// references'.
 ///                                       (14.10.2016.) (Domagoj Saric)
-#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) ) || ( defined( __clang__ ) && __clang_major__ <= 7 ) || defined( BOOST_GCC /*10.1*/ )
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) ) || ( defined( __clang__ ) && __clang_major__ <= 7 )
 #define BOOST_AUX_NOEXCEPT_PTR( condition )
 #else
 #define BOOST_AUX_NOEXCEPT_PTR( condition ) noexcept( condition )
@@ -670,7 +670,7 @@ struct empty_checker<false>
 };
 
 
-#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1903 ) ) || defined( __clang__ /*NDK r21 TODO test more versions*/ ) || defined( BOOST_GCC /*10.1*/ )
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1903 ) ) || defined( __clang__ /*NDK r21 TODO test more versions*/ )
 /// \note Clang seems to uncoditionally 'see' invoke_impl (in the main template) as not noexcept and then errors at the
 ///  assignment.
 ///  See the above note for BOOST_AUX_NOEXCEPT_PTR for MSVC.
@@ -692,7 +692,7 @@ template <>
 struct destroyer<support_level::nofail>
 {
     template <typename Manager> constexpr destroyer( Manager const * ) noexcept : destroy( &Manager::destroy ) {}
-    void (BOOST_CC_FASTCALL * const destroy)( function_buffer_base &  __restrict buffer ) noexcept;
+    void (BOOST_CC_FASTCALL * const destroy)( function_buffer_base &  __restrict buffer ) BOOST_AUX_NOEXCEPT_PTR( true ); // more MSVC noexcept( <expr> ) brainfarts;
 };
 template <>
 struct cloner<support_level::nofail>
