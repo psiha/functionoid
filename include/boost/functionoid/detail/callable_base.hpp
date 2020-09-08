@@ -232,7 +232,7 @@ struct manager_trivial_small
     static void * functor_ptr( function_buffer_base & buffer ) { return &buffer; }
 
     template <typename Functor, typename Allocator>
-    static void assign( Functor const & functor, Buffer & out_buffer, Allocator )
+    static void assign( Functor const & functor, Buffer & out_buffer, Allocator ) noexcept
     {
         static_assert
         (
@@ -278,16 +278,15 @@ public:
     static void const * functor_ptr( function_buffer_base const & buffer ) { return functor_ptr( const_cast<function_buffer_base &>( buffer ) ); }
 
     template <typename Functor>
-    static void assign( Functor const & functor, function_buffer_base & out_buffer, Allocator const a )
+    static void assign( Functor const & functor, function_buffer_base & out_buffer, [[ maybe_unused ]] Allocator const a )
     {
-        BOOST_ASSERT( a == trivial_allocator() );
-        ignore_unused( a );
-
         static_assert
         (
 			functor_traits<Functor, function_buffer_base>::allowsPODOptimization &&
 			functor_traits<Functor, function_buffer_base>::hasDefaultAlignement
         );
+
+        BOOST_ASSERT( a == trivial_allocator() );
 
         function_buffer_base in_buffer;
         in_buffer.trivial_heap_obj.ptr  = const_cast<Functor *>( &functor );
@@ -297,9 +296,11 @@ public:
 
     static void BOOST_CC_FASTCALL clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer )
     {
-        trivial_allocator a;
+        BOOST_ASSERT( out_buffer.trivial_heap_obj.ptr  == 0 );
+        BOOST_ASSERT( out_buffer.trivial_heap_obj.size == 0 );
+
         auto const storage_size( in_buffer.trivial_heap_obj.size );
-        out_buffer.trivial_heap_obj.ptr  = a.allocate( storage_size );
+        out_buffer.trivial_heap_obj.ptr  = trivial_allocator{}.allocate( storage_size );
         out_buffer.trivial_heap_obj.size = storage_size;
         std::memcpy( functor_ptr( out_buffer ), functor_ptr( in_buffer ), storage_size );
     }
@@ -357,7 +358,7 @@ struct manager_small
 #endif // VS 16.7
     {
         auto & __restrict in_functor( *functor_ptr( in_buffer ) );
-        assign( std::move( in_functor ), Buffer::from_base( out_buffer ), dummy_allocator() );
+        assign( std::move( in_functor ), Buffer::from_base( out_buffer ), dummy_allocator{} );
         destroy( in_buffer );
     }
 
@@ -387,7 +388,7 @@ public:
     using wrapper_allocator_t     = typename std::allocator_traits<OriginalAllocator>::template rebind_alloc<functor_and_allocator_t>;
     using allocator_allocator_t   = typename std::allocator_traits<OriginalAllocator>::template rebind_alloc<OriginalAllocator      >;
 
-    static functor_and_allocator_t * functor_ptr( function_buffer_base & buffer )
+    static functor_and_allocator_t * functor_ptr( function_buffer_base & buffer ) noexcept
     {
         return static_cast<functor_and_allocator_t *>
         (
@@ -395,7 +396,7 @@ public:
         );
     }
 
-    static functor_and_allocator_t const * functor_ptr( function_buffer_base const & buffer )
+    static functor_and_allocator_t const * functor_ptr( function_buffer_base const & buffer ) noexcept
     {
         return functor_ptr( const_cast<function_buffer_base &>( buffer ) );
     }
