@@ -296,8 +296,8 @@ public:
 
     static void BOOST_CC_FASTCALL clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer )
     {
-        BOOST_ASSERT( out_buffer.trivial_heap_obj.ptr  == 0 );
-        BOOST_ASSERT( out_buffer.trivial_heap_obj.size == 0 );
+        BOOST_ASSERT( ( out_buffer.trivial_heap_obj.ptr  == 0 ) || ( out_buffer.trivial_heap_obj.ptr  == reinterpret_cast<void const *>( -1 ) ) );
+        BOOST_ASSERT( ( out_buffer.trivial_heap_obj.size == 0 ) || ( out_buffer.trivial_heap_obj.size == static_cast     <std::size_t >( -1 ) ) );
 
         auto const storage_size( in_buffer.trivial_heap_obj.size );
         out_buffer.trivial_heap_obj.ptr  = trivial_allocator{}.allocate( storage_size );
