@@ -317,7 +317,7 @@ public:
         BOOST_ASSERT( buffer.trivial_heap_obj.size );
 
         trivial_allocator a;
-        a.deallocate( static_cast<typename trivial_allocator::pointer>( functor_ptr( buffer ) ), buffer.trivial_heap_obj.size );
+        a.deallocate( static_cast<typename std::allocator_traits<trivial_allocator>::pointer>( functor_ptr( buffer ) ), buffer.trivial_heap_obj.size );
         debug_clear( buffer.trivial_heap_obj );
     }
 }; // struct manager_trivial_heap
