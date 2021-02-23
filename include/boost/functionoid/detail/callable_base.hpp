@@ -541,7 +541,7 @@ using functor_manager = typename functor_manager_aux
 /// \note Clang struggles...
 /// https://github.com/emscripten-core/emscripten/issues/12639#issuecomment-719235628
 ///                                       (30.11.2020.) (Domagoj Saric)
-#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) ) || ( defined( __clang__ ) && ( __clang_major__ <= 7 || __clang_major__ == 12 ) )
+#if BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1900 ) ) || ( defined( __clang__ ) && ( __clang_major__ <= 7 || __clang_major__ >= 12 ) )
 #define BOOST_AUX_NOEXCEPT_PTR( condition )
 #else
 #define BOOST_AUX_NOEXCEPT_PTR( condition ) noexcept( condition )
