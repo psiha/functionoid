@@ -590,7 +590,7 @@ struct invoker
 				)
 			)
 		);
-        static_assert( noexcept( function_object( args... ) ) >= is_noexcept, "Trying to assign a not-noexcept function object to a noexcept functionoid." );
+        static_assert( noexcept( function_object( std::forward<InvokerArguments>( args )... ) ) >= is_noexcept, "Trying to assign a not-noexcept function object to a noexcept functionoid." );
 		return function_object( std::forward<InvokerArguments>( args )... );
 	}
 }; // invoker
