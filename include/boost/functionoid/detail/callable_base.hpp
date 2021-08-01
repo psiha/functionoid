@@ -5,7 +5,7 @@
 /// \file callable_base.hpp
 /// -----------------------
 ///
-///  Copyright (c) Domagoj Saric 2010 - 2020
+///  Copyright (c) Domagoj Saric 2010 - 2021
 ///
 ///  Use, modification and distribution is subject to the Boost Software
 ///  License, Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
@@ -343,29 +343,20 @@ struct manager_small
         new ( functor_ptr( out_buffer ) ) Functor( std::forward<F>( functor ) );
     }
 
-    static void BOOST_CC_FASTCALL clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer )
-#if !( defined( _MSC_VER ) && _MSC_VER == 1927 ) // VS 16.7
-        noexcept( std::is_nothrow_copy_constructible_v<Functor> )
-#endif // VS 16.7
+    static void BOOST_CC_FASTCALL clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer ) noexcept( std::is_nothrow_copy_constructible_v<Functor> )
     {
         auto const & __restrict in_functor( *functor_ptr( in_buffer ) );
         assign( in_functor, Buffer::from_base( out_buffer ), dummy_allocator() );
     }
 
-    static void BOOST_CC_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer )
-#if !( defined( _MSC_VER ) && _MSC_VER == 1927 ) // VS 16.7
-        noexcept( std::is_nothrow_move_constructible_v<Functor> )
-#endif // VS 16.7
+    static void BOOST_CC_FASTCALL move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept( std::is_nothrow_move_constructible_v<Functor> )
     {
         auto & __restrict in_functor( *functor_ptr( in_buffer ) );
         assign( std::move( in_functor ), Buffer::from_base( out_buffer ), dummy_allocator{} );
         destroy( in_buffer );
     }
 
-    static void BOOST_CC_FASTCALL destroy( function_buffer_base & buffer )
-#if !( defined( _MSC_VER ) && _MSC_VER == 1927 ) // VS 16.7
-        noexcept ( std::is_nothrow_destructible_v<Functor> )
-#endif // VS 16.7
+    static void BOOST_CC_FASTCALL destroy( function_buffer_base & buffer ) noexcept ( std::is_nothrow_destructible_v<Functor> )
     {
         auto & __restrict functor( *functor_ptr( buffer ) );
         functor.~Functor();
@@ -418,10 +409,12 @@ public:
         >;
         assign_aux<guard_t>( std::forward<F>( functor ), out_buffer, source_allocator );
     }
-
+#if BOOST_MSVC // Bogus heap-overflow failure w/ VS 16.10 in implicit memcpy of OriginalAllocator{ in_functor_and_allocator.allocator() }
+    __declspec( no_sanitize_address )
+#endif // BOOST_MSVC
     static void BOOST_CC_FASTCALL clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer )
     {
-        functor_and_allocator_t const & in_functor_and_allocator( *functor_ptr( in_buffer ) );
+        functor_and_allocator_t const & in_functor_and_allocator{ *functor_ptr( in_buffer ) };
         assign( in_functor_and_allocator.functor(), out_buffer, in_functor_and_allocator.allocator() );
     }
 
@@ -430,10 +423,7 @@ public:
         manager_trivial_heap<OriginalAllocator>::move( std::move( in_buffer ), out_buffer );
     }
 
-    static void BOOST_CC_FASTCALL destroy( function_buffer_base & buffer )
-#   if !( defined( _MSC_VER ) && _MSC_VER == 1927 ) // VS 16.7
-        noexcept( std::is_nothrow_destructible_v<Functor> )
-#   endif
+    static void BOOST_CC_FASTCALL destroy( function_buffer_base & buffer ) noexcept( std::is_nothrow_destructible_v<Functor> )
     {
         functor_and_allocator_t & __restrict in_functor_and_allocator( *functor_ptr( buffer ) );
 
@@ -709,9 +699,7 @@ struct mover<support_level::nofail>
     void (BOOST_CC_FASTCALL * const move)( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) BOOST_AUX_NOEXCEPT_PTR( true ); // more MSVC noexcept( <expr> ) brainfarts
     template <typename Manager> constexpr mover( Manager const * ) noexcept : move( &Manager::move )
     {
-#   if !( defined( _MSC_VER ) && _MSC_VER == 1927 ) // VS 16.7
         static_assert( noexcept( Manager::move( std::declval<function_buffer_base &&>(), std::declval<function_buffer_base &>() ) ) );
-#   endif
     }
 };
 #undef BOOST_AUX_NOEXCEPT_PTR
