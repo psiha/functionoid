@@ -1,11 +1,11 @@
 ////////////////////////////////////////////////////////////////////////////////
 ///
 /// Boost.Functionoid library
-/// 
+///
 /// \file functionoid.hpp
 /// ---------------------
 ///
-///  Copyright (c) Domagoj Saric 2010 - 2019
+///  Copyright (c) Domagoj Saric 2010 - 2020
 ///
 ///  Use, modification and distribution is subject to the Boost Software
 ///  License, Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
@@ -50,7 +50,7 @@ public: // Public typedefs/introspection section.
 	static constexpr std::uint8_t arity = sizeof...( Arguments );
 
     template <typename FunctionObject>
-    static bool constexpr requiresAllocation = !detail::functor_traits<FunctionObject, buffer>::allowsSmallObjectOptimization;
+    static bool constexpr requires_allocation = !detail::functor_traits<FunctionObject, buffer>::allowsSmallObjectOptimization;
 
 private: // Private implementation types.
     // We need a specific thin wrapper around the base empty handler that will
@@ -66,7 +66,7 @@ private: // Private implementation types.
         }
     };
 
-    using base_vtable = typename detail::callable_base<Traits>::base_vtable;
+    using base_vtable = typename detail::callable_base<Traits>::vtable;
     using vtable_type = detail::vtable<detail::invoker<Traits::is_noexcept, ReturnType, Arguments...>, Traits>;
 
     /// \note
@@ -115,7 +115,7 @@ private: // Private implementation types.
         template <typename F>
         base_vtable const & operator()( function_base & base, F && f ) const noexcept( std::is_nothrow_constructible<std::remove_reference_t<F>, F>::value )
         {
-		    using NakedFunctionObj = typename std::remove_const<typename std::remove_reference<F>::type>::type;
+		    using NakedFunctionObj = std::remove_const_t<std::remove_reference_t<F>>;
 		    return (*this)( base, std::forward<F>( f ), typename Traits:: template allocator<NakedFunctionObj>() );
         }
     }; // struct no_eh_state_constructor
@@ -123,31 +123,32 @@ private: // Private implementation types.
     using no_eh_state_construction_trick_tag = typename function_base::no_eh_state_construction_trick_tag;
 
 public: // Public function interface.
-    callable() noexcept : function_base( empty_handler_vtable(), empty_handler() ) {}
+    callable() noexcept : function_base( empty_handler_vtable(), empty_handler{} ) {}
 
     template <typename Functor> // SFINAE/enable if required by MSVC 16 for construction from a callable & (mutable reference)
     callable( Functor && f, std::enable_if_t< !std::is_same_v< std::decay_t<Functor>, callable > > * = nullptr ) noexcept( std::is_nothrow_constructible_v<std::decay_t<Functor>, Functor> /*...mrmlj...&& !is_heap_allocated*/ )
-        : function_base( no_eh_state_construction_trick_tag(), no_eh_state_constructor(), std::forward<Functor>( f ) ) {}
+        : function_base( no_eh_state_construction_trick_tag{}, no_eh_state_constructor{}, std::forward<Functor>( f ) ) {}
 
     template <typename Functor, typename Allocator>
     callable( Functor && f, Allocator const a ) noexcept( std::is_nothrow_constructible_v<std::decay_t<Functor>, Functor> /*...mrmlj...&& !is_heap_allocated*/ )
-        : function_base( no_eh_state_construction_trick_tag(), no_eh_state_constructor(), std::forward<Functor>( f ), a ) {}
+        : function_base( no_eh_state_construction_trick_tag{}, no_eh_state_constructor{}, std::forward<Functor>( f ), a ) {}
 
     callable( signature_type * const plain_function_pointer ) noexcept
-        : function_base( no_eh_state_construction_trick_tag(), no_eh_state_constructor(), plain_function_pointer ) {}
+        : function_base( no_eh_state_construction_trick_tag{}, no_eh_state_constructor{}, plain_function_pointer ) {}
 
     callable( callable const & f ) noexcept( Traits::copyable >= support_level::nofail )
         : function_base( static_cast<function_base const &>( f ), empty_handler_vtable() ) { static_assert( Traits::copyable > support_level::na, "This callable instantiation is not copyable." ); }
 
 	callable( callable && f ) noexcept( Traits::moveable >= support_level::nofail )
-		: function_base( static_cast<function_base&&>( f ), empty_handler_vtable() ) {}
+		: function_base( static_cast<function_base &&>( f ), empty_handler_vtable() ) {}
 
-	result_type BOOST_CC_FASTCALL operator()( Arguments... args ) const noexcept( Traits::is_noexcept )
+    template <typename ... CallArguments>
+	result_type BOOST_CC_FASTCALL operator()( CallArguments &&... args ) const noexcept( Traits::is_noexcept )
 	{
-        return vtable().invoke( this->functor(), args... );
+        return vtable().invoke( this->functor(), std::forward< CallArguments >( args )... );
 	}
 
-    callable & operator=( callable const  & f ) noexcept( Traits::copyable >= support_level::nofail ) { static_assert( Traits::copyable > support_level::na, "This callable instantiation is not copyable." ); this->assign( f ); return *this; }
+    callable & operator=( callable const  & f ) noexcept( Traits::copyable >= support_level::nofail ) { static_assert( Traits::copyable > support_level::na, "This callable instantiation is not copyable." ); this->assign(            f   ); return *this; }
     callable & operator=( callable       && f ) noexcept( Traits::moveable >= support_level::nofail ) { static_assert( Traits::moveable > support_level::na, "This callable instantiation is not moveable." ); this->assign( std::move( f ) ); return *this; }
     callable & operator=( signature_type * const plain_function_pointer ) noexcept { this->assign( plain_function_pointer ); return *this; }
     template <typename F>
@@ -158,6 +159,8 @@ public: // Public function interface.
 
     template <typename F, typename Allocator>
     void assign( F && f, Allocator const a ) { this->do_assign<false>( std::forward<F>( f ), a ); }
+
+    void assign( std::nullptr_t ) noexcept { clear(); }
 
     /// Clear out a target (replace it with an empty handler), if there is one.
     void clear() { function_base:: template clear<false, empty_handler>( empty_handler_vtable() ); }
@@ -185,7 +188,7 @@ private:
     template <typename Allocator, typename ActualFunctor>
     static vtable_type const & vtable_for_functor_aux( std::true_type /*is a callable*/, callable const & functor )
     {
-        static_assert( std::is_base_of<callable, typename std::remove_reference<ActualFunctor>::type>::value );
+        static_assert( std::is_base_of_v<callable, std::remove_reference_t<ActualFunctor>> );
         return functor.vtable();
     }
 
@@ -201,12 +204,12 @@ private:
         using is_empty_handler = std::is_same<ActualFunctor, empty_handler>;
         using manager_type = functor_manager
         <
-            typename std::conditional
+            std::conditional_t
             <
                 is_empty_handler::value,
                 ActualFunctor,
                 StoredFunctor
-            >::type,
+            >,
             Allocator,
             buffer
         >;
@@ -218,26 +221,33 @@ private:
             std::is_same<StoredFunctor, my_empty_handler>::value
         );
 
+        static_assert
+        (
+            std::is_copy_constructible_v<StoredFunctor> || Traits::copyable == support_level::na,
+            "This callable instantiation requires copyable targets."
+        );
+
+        static_assert
+        (
+            std::is_nothrow_copy_constructible_v<StoredFunctor> || ( Traits::copyable == support_level::na || Traits::copyable == support_level::supported ),
+            "This callable instantiation requires nothrow copy constructible targets."
+        );
+
         using invoker_type = invoker<Traits::is_noexcept, ReturnType, Arguments...>;
 
-        // http://stackoverflow.com/questions/24398102/constexpr-and-initialization-of-a-static-const-void-pointer-with-reinterpret-cas
-        //
         // Note: it is extremely important that this initialization uses
         // static initialization. Otherwise, we will have a race
         // condition here in multi-threaded code or inefficient thread-safe
 		// initialization. See
         // http://thread.gmane.org/gmane.comp.lib.boost.devel/164902.
-        static
-#	   if !BOOST_WORKAROUND( BOOST_MSVC, BOOST_TESTED_AT( 1920 ) )
-			constexpr
-#		endif
+        static constexpr
 		detail::vtable<invoker_type, Traits> const the_vtable
-        (
+        {
             static_cast<manager_type  const *>( nullptr ),
             static_cast<ActualFunctor const *>( nullptr ),
             static_cast<StoredFunctor const *>( nullptr ),
             is_empty_handler::value
-        );
+        };
         return the_vtable;
     } // vtable_for_functor_aux()
 
@@ -258,7 +268,7 @@ private:
     void do_assign( F && f, Allocator const a )
     {
         using tag = typename detail::get_function_tag<F>::type;
-        dispatch_assign<direct>( std::forward<F>( f ), a, tag() );
+        dispatch_assign<direct>( std::forward<F>( f ), a, tag{} );
     }
 
     template <bool direct, typename F>
@@ -266,7 +276,7 @@ private:
     {
         using functor_type = std::remove_const_t<std::remove_reference<F>>;
         using allocator    = typename Traits:: template allocator<functor_type>;
-        do_assign<direct>( std::forward<F>( f ), allocator() );
+        do_assign<direct>( std::forward<F>( f ), allocator{} );
     }
 
     template <bool direct, typename F, typename Allocator>
@@ -292,21 +302,15 @@ private:
     template <bool direct, typename ActualFunctor, typename StoredFunctor, typename ActualFunctorAllocator>
     void do_assign( ActualFunctor const &, StoredFunctor && stored_functor, ActualFunctorAllocator const a )
     {
-        static_assert
-        (
-            Traits::copyable == support_level::na || std::is_copy_constructible_v<StoredFunctor>,
-            "This callable instantiation requires copyable function objects."
-        );
-
 		using NakedStoredFunctor     = std::remove_const_t<std::remove_reference_t<StoredFunctor>>;
-        using StoredFunctorAllocator = typename ActualFunctorAllocator:: template rebind<NakedStoredFunctor>::other;
+        using StoredFunctorAllocator = typename std::allocator_traits<ActualFunctorAllocator>::template rebind_alloc<NakedStoredFunctor>;
         function_base:: template assign<direct, empty_handler>
         (
             std::forward<StoredFunctor>( stored_functor ),
             vtable_for_functor<StoredFunctorAllocator, ActualFunctor>( stored_functor ),
             empty_handler_vtable(),
             StoredFunctorAllocator( a ),
-            std::is_base_of<callable, NakedStoredFunctor>() /*are we assigning another callable?*/
+            std::is_base_of<detail::callable_tag, NakedStoredFunctor>{} /*are we assigning another callable?*/
         );
     }
 }; // class callable
