@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////
 ///
-/// Boost.Functionoid library
+/// Psi.Functionoid library
 /// 
 /// \file policies.hpp
 /// ------------------
@@ -24,20 +24,17 @@
 #include <memory>
 #include <stdexcept>
 //------------------------------------------------------------------------------
-namespace boost
-{
-//------------------------------------------------------------------------------
-namespace functionoid
+namespace psi::functionoid
 {
 //------------------------------------------------------------------------------
 
 /// The bad_function_call exception class is thrown when an empty
-/// boost::functionoid object is invoked that uses the throw_on_empty empty
+/// Psi.Functionoid callable is invoked that uses the throw_on_empty empty
 /// handler.
 class bad_function_call : public std::runtime_error
 {
 public:
-    bad_function_call() : std::runtime_error( "call to empty boost::functionoid" ) {}
+    bad_function_call() : std::runtime_error( "call to empty Psi.Functionoid callable" ) {}
 };
 
 class throw_on_empty
@@ -108,10 +105,19 @@ struct default_traits : std_traits
     static constexpr auto dll_safe_empty_check = false;
 
     using empty_handler = assert_on_empty;
+
+    /// Optional hook for decorating vtable invoke/manager function pointers with
+    /// compiler attributes (`gnu::pure`, `clang::preserve_most`, …). Set
+    /// `PSI_FUNCTIONOID_DETAIL_INVOKE_FN_ATTR` / `MANAGER_FN_ATTR` before
+    /// including functionoid headers, or specialize the constexpr flags below
+    /// for documentation / static introspection (`detail::vtable_attr_meta`).
+    struct vtable_fn_attrs
+    {
+        static constexpr bool invoke_pure    = false;
+        static constexpr bool manager_nofail = false;
+    };
 }; // struct default_traits
 
 //------------------------------------------------------------------------------
-} // namespace functionoid
-//------------------------------------------------------------------------------
-} // namespace boost
+} // namespace psi::functionoid
 //------------------------------------------------------------------------------

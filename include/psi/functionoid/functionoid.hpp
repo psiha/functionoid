@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////
 ///
-/// Boost.Functionoid library
+/// Psi.Functionoid library
 ///
 /// \file functionoid.hpp
 /// ---------------------
@@ -25,10 +25,7 @@
 #include <cstdint>
 #include <type_traits>
 //------------------------------------------------------------------------------
-namespace boost
-{
-//------------------------------------------------------------------------------
-namespace functionoid
+namespace psi::functionoid
 {
 //------------------------------------------------------------------------------
 
@@ -143,7 +140,7 @@ public: // Public function interface.
 		: function_base( static_cast<function_base &&>( f ), empty_handler_vtable() ) {}
 
     template <typename ... CallArguments>
-	result_type BOOST_CC_FASTCALL operator()( CallArguments &&... args ) const noexcept( Traits::is_noexcept )
+	result_type operator()( CallArguments &&... args ) const noexcept( Traits::is_noexcept )
 	{
         return vtable().invoke( this->functor(), std::forward< CallArguments >( args )... );
 	}
@@ -321,7 +318,5 @@ template <typename Signature, typename Traits> void operator==( callable<Signatu
 template <typename Signature, typename Traits> void operator!=( callable<Signature, Traits> const &, callable<Signature, Traits> const & );
 
 //------------------------------------------------------------------------------
-} // namespace functionoid
-//------------------------------------------------------------------------------
-} // namespace boost
+} // namespace psi::functionoid
 //------------------------------------------------------------------------------

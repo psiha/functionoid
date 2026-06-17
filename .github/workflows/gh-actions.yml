@@ -1,0 +1,47 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [ master, feat/psi-modernization ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+    name: ${{ matrix.config.name }} — ${{ matrix.build_type }}
+    runs-on: ${{ matrix.config.os }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { os: ubuntu-latest, name: Clang, cc: clang, cxx: clang++, gen: '-G Ninja' }
+          - { os: macos-26, name: Apple-Clang, cc: clang, cxx: clang++, gen: '-G Ninja' }
+        build_type: [Debug, Release]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM/Clang 22 (Linux)
+        if: matrix.config.name == 'Clang'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod u+x llvm.sh
+          sudo ./llvm.sh 22 all
+          echo "CC=/usr/lib/llvm-22/bin/clang" >> $GITHUB_ENV
+          echo "CXX=/usr/lib/llvm-22/bin/clang++" >> $GITHUB_ENV
+
+      - name: Configure
+        run: |
+          cmake -B build ${{ matrix.config.gen }} \
+            -DCMAKE_CXX_COMPILER="${CXX:-${{ matrix.config.cxx }}}" \
+            -DCMAKE_C_COMPILER="${CC:-${{ matrix.config.cc }}}" \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -S .
+
+      - name: Build & test
+        run: |
+          cmake --build build --config ${{ matrix.build_type }} -j
+          cd build/test
+          ctest --output-on-failure -C ${{ matrix.build_type }}

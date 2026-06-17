@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////
 ///
-/// Boost.Functionoid library
+/// Psi.Functionoid library
 /// 
 /// \file rtti.hpp
 /// --------------
@@ -20,7 +20,7 @@
 #include <boost/core/ignore_unused.hpp>
 #include <boost/core/ref.hpp>
 #include <boost/core/typeinfo.hpp>
-#include <boost/function_equal.hpp>
+#include <psi/functionoid/detail/function_equal.hpp>
 #include <boost/throw_exception.hpp>
 
 #include <stdexcept>
@@ -36,7 +36,9 @@ template <typename T> struct is_reference_wrapper<std::reference_wrapper<T> cons
 template <typename T> struct is_reference_wrapper<std::reference_wrapper<T> volatile      > : std::true_type {};
 template <typename T> struct is_reference_wrapper<std::reference_wrapper<T> const volatile> : std::true_type {};
 //------------------------------------------------------------------------------
-namespace functionoid
+} // namespace boost
+//------------------------------------------------------------------------------
+namespace psi::functionoid
 {
 //------------------------------------------------------------------------------
 
@@ -57,10 +59,10 @@ public:
         volatile_qualified_( std::is_volatile  <Functor>::value )
     {}
 
-    core::typeinfo const & functor_type_info() const noexcept { return type_id_; }
+    boost::core::typeinfo const & functor_type_info() const noexcept { return type_id_; }
 
     template <typename Functor>
-    Functor * BOOST_CC_FASTCALL target() noexcept
+    Functor * target() noexcept
     {
         return static_cast<Functor *>
         (
@@ -74,9 +76,9 @@ public:
     }
 
 private:
-    void * BOOST_CC_FASTCALL get_functor_if_types_match
+    void * get_functor_if_types_match
     (
-        core::typeinfo const & other,
+        boost::core::typeinfo const & other,
         bool const other_const_qualified,
         bool const other_volatile_qualified
     ) const noexcept
@@ -96,7 +98,7 @@ private:
 
 private:
     void           const * const p_functor_;
-    core::typeinfo const &       type_id_;
+    boost::core::typeinfo const &       type_id_;
     // Whether the type is const-qualified.
     bool const const_qualified_;
     // Whether the type is volatile-qualified.
@@ -137,11 +139,11 @@ namespace detail
         }
 
     public:
-        static typed_functor BOOST_CC_FASTCALL get_typed_functor( function_buffer_base const & buffer ) noexcept
+        static typed_functor get_typed_functor( function_buffer_base const & buffer ) noexcept
         {
             auto          * const pFunctor      ( FunctorManager::functor_ptr( const_cast<function_buffer_base &>( buffer ) ) );
             StoredFunctor * const pStoredFunctor( static_cast<StoredFunctor *>( static_cast<void *>( pFunctor ) ) );
-            ActualFunctor * const pActualFunctor( actual_functor_ptr( pStoredFunctor, std::integral_constant<bool, is_reference_wrapper<StoredFunctor>::value>(), std::is_member_pointer<ActualFunctor>() ) );
+            ActualFunctor * const pActualFunctor( actual_functor_ptr( pStoredFunctor, std::integral_constant<bool, boost::is_reference_wrapper<StoredFunctor>::value>(), std::is_member_pointer<ActualFunctor>() ) );
             return typed_functor( *pActualFunctor );
         }
     }; // functor_type_info
@@ -172,21 +174,19 @@ template <typename Traits, typename Functor> bool operator!=( detail::function_b
 template <typename Traits, typename Functor> bool operator!=( Functor g, detail::function_base<Traits> const & f ) { return f != g; }
 
 template <typename Traits, typename Functor>
-bool operator==( detail::function_base<Traits> const & f, reference_wrapper<Functor> const g )
+bool operator==( detail::function_base<Traits> const & f, boost::reference_wrapper<Functor> const g )
 {
     auto const p_f( f. template target<Functor>() );
     return p_f == g.get_pointer();
 }
 template <typename Traits, typename Functor>
-bool operator==( reference_wrapper<Functor> const g, detail::function_base<Traits> const & f ) { return f == g; }
+bool operator==( boost::reference_wrapper<Functor> const g, detail::function_base<Traits> const & f ) { return f == g; }
 
 template <typename Traits, typename Functor>
-bool operator!=( detail::function_base<Traits> const & f, reference_wrapper<Functor> const g ) { return !( f == g ); }
+bool operator!=( detail::function_base<Traits> const & f, boost::reference_wrapper<Functor> const g ) { return !( f == g ); }
 template <typename Traits, typename Functor>
-bool operator!=( reference_wrapper<Functor> const g, detail::function_base<Traits> const & f ) { return f != g; }
+bool operator!=( boost::reference_wrapper<Functor> const g, detail::function_base<Traits> const & f ) { return f != g; }
 
 //------------------------------------------------------------------------------
-} // namespace functionoid
-//------------------------------------------------------------------------------
-} // namespace boost
+} // namespace psi::functionoid
 //------------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////
 ///
-/// Boost.Functionoid library
+/// Psi.Functionoid library
 /// 
 /// \file functionoid_fwd.hpp
 /// -------------------------
@@ -15,13 +15,9 @@
 /// For more information, see http://www.boost.org
 ///
 ////////////////////////////////////////////////////////////////////////////////
-#ifndef BOOST_FUNCTIONOID_FWD_HPP
-#define BOOST_FUNCTIONOID_FWD_HPP
+#pragma once
 //------------------------------------------------------------------------------
-namespace boost
-{
-//------------------------------------------------------------------------------
-namespace functionoid
+namespace psi::functionoid
 {
 //------------------------------------------------------------------------------
 
@@ -43,8 +39,5 @@ template<typename Signature, typename Traits>
 void swap( callable<Signature, Traits> & f1, callable<Signature, Traits> & f2 ) { f1.swap( f2 ); }
 
 //------------------------------------------------------------------------------
-} // namespace functionoid
+} // namespace psi::functionoid
 //------------------------------------------------------------------------------
-} // namespace boost
-//------------------------------------------------------------------------------
-#endif // BOOST_FUNCTIONOID_FWD_HPP

@@ -7,10 +7,9 @@
 //  http://www.boost.org/LICENSE_1_0.txt)
 
 // For more information, see http://www.boost.org
-#ifndef BOOST_FUNCTION_EQUAL_HPP
-#define BOOST_FUNCTION_EQUAL_HPP
+#pragma once
 
-namespace boost {
+namespace psi::functionoid {
 
 template<typename F, typename G>
   bool function_equal_impl(const F& f, const G& g, long)
@@ -23,6 +22,4 @@ template<typename F, typename G>
   bool function_equal(const F& f, const G& g)
   { return function_equal_impl(f, g, 0); }
 
-} // end namespace boost
-
-#endif // BOOST_FUNCTION_EQUAL_HPP
+} // namespace psi::functionoid
