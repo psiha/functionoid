@@ -1,86 +1,111 @@
-#### Old notes (before conversion to C++14, renaming to functionoid/callable)
+# Psi.Functionoid
 
-An alternate boost::function implementation that
-- minimizes template and RTTI bloat
-- has (much) less runtime overhead (for invocation, copy-construction and assignment)
-- provides configurability through policies.
+Header-only, policy-driven type erasure for callables. Modernized C++14+ groud-up redesign of boost/std::function.
 
-It is intended to be a drop-in replacement hence the same folder name as the
-original.
+Two public surfaces:
 
-For more information see the relevant discussion threads at boost.devel:
-http://lists.boost.org/Archives/boost/2010/10/172593.php
-http://thread.gmane.org/gmane.comp.lib.boost.devel/194514/focus=195351
-http://article.gmane.org/gmane.comp.lib.boost.devel/196906.
+| Type | Role |
+|------|------|
+| **`callable`** | Owning wrapper — configurable `std::function` replacement |
+| **`function_ref`** | Non-owning view — configurable `std::function_ref` replacement |
 
-Related undertakings:
-- https://github.com/mamedev/delegates
-- http://www.codeproject.com/Articles/7150/Member-Function-Pointers-and-the-Fastest-Possible
-- http://www.codeproject.com/Articles/11015/The-Impossibly-Fast-C-Delegates
-- http://www.codeproject.com/Articles/18389/Fast-C-Delegate-Boost-Function-drop-in-replacement
-- http://www.codeproject.com/Articles/13287/Fast-C-Delegate
-- http://stackoverflow.com/questions/4298408/5-years-later-is-there-something-better-than-the-fastest-possible-c-delegate
-- http://www.gamedev.net/topic/549468-fast-c-delegates/
-- http://codereview.stackexchange.com/questions/14730/impossibly-fast-delegate-in-c11
-- https://probablydance.com/2013/01/13/a-faster-implementation-of-stdfunction
-- move-only problem:
-  - http://lwg.github.io/issues/lwg-defects.html#1287
-  - http://stackoverflow.com/questions/25330716/move-only-version-of-stdfunction
-  - https://groups.google.com/forum/#!topic/comp.lang.c++.moderated/OFAMx695NJg
-  - https://groups.google.com/a/isocpp.org/forum/#!topic/std-proposals/hFBaATcX0Wo
+## Why not `std::function`?
 
-Currently this (alternate) code is based on original code from the
-boost::function official 1.43 release (but it has been rebased on the current master
-as part of the move from the sandbox to github). For the originial documentation see
-http://www.boost.org/doc/libs/1_43_0/doc/html/function.html.
+`std::function` fixed the ergonomics of type-erased callbacks, but the design is
+largely frozen: one size fits all (always copyable, fixed SBO, RTTI-based
+`target_type`/`target`, empty handler throws). Hot paths pay for features they
+never use.
 
-It was tested (compiling and running real world projects, building Boost and
-running Boost regression tests) with the following compilers:
- - MSVC++ 8.0 SP1, 10.0 (x86 and x64)
- - GCC 4.0.1, 4.2.1, 4.5.1
- - Clang 2.0, 2.8
- - Sun Studio 5.9, 5.10
- - VisualAge 11.1.
+**Psi.Functionoid `callable`** keeps the familiar “assign anything callable” model
+but makes behaviour a **compile-time policy** (`default_traits` and custom
+specializations):
 
+- **SBO tuning** — buffer size and alignment are traits, not hard-coded.
+- **Copy / move / destroy levels** — `support_level::{na,supported,nofail,trivial}`
+  so move-only, noexcept-move, or trivial-destruction paths need no copy vtable
+  slots (sweater `work_t` uses move-only + trivial dtor).
+- **Empty handler** — throw, assert, or no-op on invoke of an empty wrapper.
+- **RTTI** — on or off (`default_traits` disables it).
+- **Noexcept signature** — trait-driven `noexcept` on `operator()`.
+- **Vtable call-site hints** — optional `gnu::pure`, `clang::preserve_most`, … on
+  invoke/manager function pointers (`detail::vtable_attrs.hpp`).
+- **Less bloat** — front/back split inherited from Functionoid: thin fixed ABI
+  “front”, typed invoker/manager “back”; fewer template instantiations and less
+  RTTI than classic `boost::function`.
 
-For the sake of brevity of future commit messages, comments etc. allow me to 
-add a few terminology definitions. Looking at the boost/tr1::function<> design/
-idea we can identify two 'domains':
- - the "front side" or the interface side or the "fixed type" or ABI side. The
-interface that the user sees and the code that exists and executes _before_ the
-call through a function pointer in the vtable (e.g. the code in operator()
-before the invoke call is made, or code in operator= before calls to the manager
-are made ...)
- - the "back side" or that which stands behind the 'function pointer brick wall'/
-'type erasure' (the actual invoker and the actual manager), which changes with
-each assignement, which, at the point of change or creation has all the type
-information it wants.
+Typical wins: lower per-call overhead, smaller hot-loop binaries, and wrappers
+sized to the embedding project instead of the standard library’s compromise.
 
-A few more notes:
-- the default interface and behaviour remain the same (current code should work
-the same without modification with these changes, "or so it seems to me")
-- the empty handler objects are required to satisfy the is_stateless<>
-condition (even though the current code should work even w/o this requirement
-being satisfied)
-- all function objects used with boost::function<> are expected to have a
-nothrow destructor
-- the swap and non-trivial assignment function do not offer the strong
-exception safety guarantee in the special case when one or both of the objects
-at stake is or has (if it is a boost::function<> object "holding" some function
-object) a function object that fits in the function_buffer but does not have a
-nothrow copy constructor and therefore does not have a no-fail move
-operation...in this case it can happen that the final move operation (in the
-swap procedure) from the tmp object to *this can fail and then the attempt to
-restore (move) the original *this from a backup location can also fail leaving
-us with no valid object in *this...in this situation the *this function object
-is cleared (the EmptyHandler is assigned)...as far as i could tell the original
-boost::function<> implementation had the same behaviour...
-- a few more ideas of what can be made a matter of policy: size and alignment
-of the function buffer (perhaps some library uses only complex targets so it
-would benefit if the function_buffer optimization would be eliminated all
-together...on the other some other library would benefit if the buffer would be
-better aligned or enlarged by "just one int" and then no memory allocation
-would take place for that library ...etc...)
-- there is the ever present problem of what to return from empty handlers for 
-non-void and non-default constructible return types...
-...
+## Compared to the standard “fix attempts”
+
+C++23 **`std::move_only_function`** and the ongoing **`std::copyable_function`**
+proposal address the worst parts of `std::function` (move-only storage, clearer
+empty behaviour) but remain **non-configurable**: you pick the standard type, not
+policies. You cannot turn off RTTI, shrink the SBO for cache footprint, mark
+vtable calls `[[gnu::pure]]`, or select assert-on-empty for debug builds.
+
+**Psi.Functionoid** is the layer below those typedefs: one `callable` template,
+many shapes — including move-only noexcept aliases that match or beat
+`std::move_only_function` for scheduler/work-queue use, and copyable
+`std_traits` for drop-in `std::function` semantics when you need them.
+
+## `function_ref`
+
+Non-owning type-erased reference to a callable with signature `R(Args...)`
+(optionally `noexcept`). Same conceptual slot as **`std::function_ref`**
+(P2637): pass a callback into an API without allocating or owning it.
+
+Optimizations beyond a naive vtable indirection:
+
+1. **Pointer-sized SBO** — if the decayed callable is trivially copyable and
+   fits in the storage word (`sizeof(void*)`), it is **embedded inline** and
+   invoked without an extra load.
+2. **Borrowed object** — otherwise the ref holds a pointer to the caller’s
+   callable (lifetime is the caller’s responsibility, as with `function_ref`).
+
+### Exception tunneling (C / V8 / other `noexcept` APIs)
+
+Many foreign interfaces only accept **`noexcept` function pointers** — C
+callbacks, V8 embedder hooks, etc. C++ callables that may throw cannot be passed
+directly.
+
+When the source callable is not `noexcept`-compatible, `function_ref` wraps it in
+an **`exception_tunneling_callable`**: the exported callback is `noexcept`, catches
+all exceptions into a `std::exception_ptr`, returns a default-constructed `R`
+(or `void`), and the caller rethrows via **`check_failure()`** after the foreign
+call returns. See `make_exception_tunneling_callable` and `make_c_callback` in
+`include/psi/functionoid/function_ref.hpp`.
+
+## Quick start (standalone)
+
+```bash
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -S .
+cmake --build build
+cd build/test && ctest --output-on-failure
+```
+
+## Embedding (sweater / host projects)
+
+- `functionoid.cmake` → `Psi::Functionoid` INTERFACE target
+- Include: `#include <psi/functionoid/functionoid.hpp>` or `function_ref.hpp`
+- sweater `work_t` = `psi::functionoid::callable<void(), worker_traits>`
+
+## Traits
+
+`default_traits` is copyable + RTTI-off. Hot paths use move-only noexcept variants
+(`copyable=na`, `moveable=nofail`, `destructor=trivial`). Optional vtable function
+pointer attributes via `PSI_FUNCTIONOID_DETAIL_INVOKE_FN_ATTR` — see
+`include/psi/functionoid/detail/vtable_attrs.hpp`.
+
+---
+
+### History
+
+An alternate Boost.Function implementation (minimize template/RTTI bloat, lower
+runtime overhead, policy configurability). Lineage: Boost.Function 1.43, rebased
+through the Functionoid fork. For original Boost.Function docs see
+https://www.boost.org/doc/libs/1_43_0/doc/html/function.html .
+
+Related discussion and delegate implementations are listed in the archived notes
+at the bottom of this file’s git history; the design glossary (front side / back
+side, empty handler, SBO policy) still applies to `callable`.
