@@ -55,8 +55,8 @@ public:
         :
         p_functor_         ( std::addressof   ( functor )       ),
         type_id_           ( BOOST_CORE_TYPEID( Functor )       ),
-        const_qualified_   ( std::is_const     <Functor>::value ),
-        volatile_qualified_( std::is_volatile  <Functor>::value )
+        const_qualified_   ( std::is_const_v     <Functor> ),
+        volatile_qualified_( std::is_volatile_v  <Functor> )
     {}
 
     boost::core::typeinfo const & functor_type_info() const noexcept { return type_id_; }
@@ -69,8 +69,8 @@ public:
             get_functor_if_types_match
             (
                 BOOST_CORE_TYPEID( Functor ),
-                std::is_const     <Functor>::value,
-                std::is_volatile  <Functor>::value
+                std::is_const_v     <Functor>,
+                std::is_volatile_v  <Functor>
             )
         );
     }

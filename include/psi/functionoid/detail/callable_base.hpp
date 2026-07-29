@@ -101,24 +101,6 @@ struct function_obj_tag     {};
 struct member_ptr_tag       {};
 struct function_obj_ref_tag {};
 
-// When functions and function pointers are decorated with exception
-// specifications MSVC mangles their type (almost) beyond recognition.
-// Even MSVC supplied type traits is_pointer, is_member_pointer and
-// is_function no longer recognize them. This tester is a workaround that
-// seems to work well enough for now.
-template <typename T>
-using is_msvc_exception_specified_function_pointer = std::integral_constant
-<
-    bool,
-#ifdef _MSC_VER
-    !std::is_class_v      <T> &&
-    !std::is_fundamental_v<T> &&
-    ( sizeof( T ) == sizeof( void (*)() ) )
-#else
-    false
-#endif
->;
-
 template <typename F>
 struct get_function_tag
 {
@@ -746,20 +728,6 @@ vtable
 template <typename Traits>
 using base_vtable = vtable<invoker<true, void>, Traits>;
 
-template <typename T>
-T get_default_value( std::false_type /*not a reference type*/ ) { return {}; }
-
-template <>
-inline void get_default_value<void>( std::false_type /*not a reference type*/ ) {}
-
-template <typename T>
-T get_default_value( std::true_type /*a reference type*/ )
-{
-    using actual_type_t = std::remove_reference_t<T>;
-    static T invalid_reference( *static_cast<actual_type_t *>( 0 ) );
-    return invalid_reference;
-}
-
 ////////////////////////////////////////////////////////////////////////////
 struct callable_tag {};
 
@@ -917,21 +885,26 @@ protected:
 			emptyHandler,
 			empty_handler_vtable,
 			empty_handler_vtable,
-			std::allocator<EmptyHandler>(),
-			std::false_type()
+			std::allocator<EmptyHandler>()
 		);
 	}
 
+	// Whether the source is itself a callable is a property of its type, so the
+	// two implementations are constrained on it directly rather than selected
+	// by a tag the caller has to compute and pass.
+	template <typename FunctionObj>
+	static bool constexpr is_a_callable{ std::is_base_of_v<callable_tag, std::remove_const_t<std::remove_reference_t<FunctionObj>>> };
+
 	// Assignment from another functionoid.
 	template <bool direct, typename EmptyHandler, typename FunctionObj, typename Allocator>
+		requires is_a_callable<FunctionObj>
 	void assign
 	(
 		FunctionObj       && f,
         [[ maybe_unused ]]
 		vtable      const &  functor_vtable,
 		vtable      const &  empty_handler_vtable,
-		Allocator,
-		std::true_type // assignment of an instance of a callable (with possibly different traits)
+		Allocator
 	)
 	{
         auto const same_traits{ std::is_convertible_v<std::decay_t<FunctionObj> *, callable_base const *> };
@@ -962,23 +935,39 @@ protected:
 
 	// General actual assignment.
 	template <bool direct, typename EmptyHandler, typename FunctionObj, typename Allocator>
+		requires ( !is_a_callable<FunctionObj> )
 	void assign
 	(
 		FunctionObj       && f,
 		vtable      const &  functor_vtable,
 		vtable      const &  empty_handler_vtable,
-		Allocator,
-		std::false_type /*generic assign*/
+		Allocator
 	);
 
+	// Whether the target can be assigned in place, without a fallible
+	// intermediate, depends only on F and the buffer - so name the condition
+	// once and constrain the two implementations on it, instead of recomputing
+	// it at the call site and threading it in as an integral_constant tag.
+	/// \todo This can/should be rewritten because the
+	/// small-object-optimization condition is too strict, even heap
+	/// allocated targets can be assigned directly because they have a
+	/// nothrow swap operation.
+	///                               (28.10.2010.) (Domagoj Saric)
+	template <typename F>
+	static bool constexpr has_no_fail_assignment
+	{
+		functor_traits<F, buffer>::allowsSmallObjectOptimization &&
+		std::is_nothrow_assignable_v<std::remove_reference_t<F>, F>
+	};
+
 	template <typename EmptyHandler, typename F, typename Allocator>
+		requires has_no_fail_assignment<F>
 	void actual_assign
 	(
 		F               &&      f,
 		vtable    const &       functor_vtable,
 		vtable    const &     /*empty_handler_vtable*/,
-		Allocator         const a,
-		std::true_type /*can use direct assign*/
+		Allocator         const a
 	) noexcept
 	{
 		using functor_manager = functor_manager<F, Allocator, buffer>;
@@ -988,13 +977,13 @@ protected:
 	}
 
 	template <typename EmptyHandler, typename F, typename Allocator>
+		requires ( !has_no_fail_assignment<F> )
 	void actual_assign
 	(
 		F               &&       f,
 		vtable    const &        functor_vtable,
 		vtable    const &        empty_handler_vtable,
-		Allocator          const a,
-		std::false_type /*must use safe assignment*/
+		Allocator          const a
 	)
 	{
 		// This most generic case needs to be reworked [currently does redundant
@@ -1017,7 +1006,7 @@ private: // Assignment from another functionoid helpers.
 
 	void assign_functionoid_direct( callable_base && source, vtable const & empty_handler_vtable ) noexcept( ( Traits::moveable >= support_level::nofail ) || ( Traits::moveable == support_level::na && Traits::copyable >= support_level::nofail ) )
 	{
-        source.move_to( *this, std::integral_constant<bool, Traits::moveable != support_level::na>{} );
+        source.move_to( *this );
 		this ->p_vtable_ = &source.get_vtable();
 		source.p_vtable_ = &empty_handler_vtable;
 	}
@@ -1106,11 +1095,15 @@ private: // Assignment from another functionoid helpers.
     // empty handler's vtable will correctly handle it.
 	void destroy() noexcept { get_vtable().destroy( this->functor_ ); }
 
-    void move_to( callable_base & destination, std::true_type  /*    has move*/ ) const noexcept( Traits::moveable >= support_level::nofail )
+    // Whether a move exists is a property of Traits alone, so constrain on it
+    // directly instead of threading an integral_constant tag through the call.
+    void move_to( callable_base & destination ) const noexcept( Traits::moveable >= support_level::nofail )
+        requires ( Traits::moveable != support_level::na )
     {
         get_vtable().move ( std::move( this->functor_ ), destination.functor_ );
     }
-    void move_to( callable_base & destination, std::false_type /*not has move*/ ) const noexcept( Traits::copyable >= support_level::nofail )
+    void move_to( callable_base & destination ) const noexcept( Traits::copyable >= support_level::nofail )
+        requires ( Traits::moveable == support_level::na )
     {
         get_vtable().clone( std::move( this->functor_ ), destination.functor_ );
     }
@@ -1191,7 +1184,7 @@ public:
 
 	static void move( callable_base & source, callable_base & destination, vtable const & empty_handler_vtable ) noexcept
 	{
-        source.move_to( destination, std::integral_constant<bool, Traits::moveable != support_level::na>{} );
+        source.move_to( destination );
 		destination.p_vtable_ = source.p_vtable_;
 		source     .p_vtable_ = &empty_handler_vtable;
 	}
@@ -1241,13 +1234,13 @@ void callable_base<Traits>::swap( callable_base & other, vtable const & empty_ha
 
 template <typename Traits>
 template <bool direct, typename EmptyHandler, typename F, typename Allocator>
+	requires ( !callable_base<Traits>::template is_a_callable<F> )
 void callable_base<Traits>::assign
 (
 	F               &&       f,
 	vtable    const &        functor_vtable,
 	vtable    const &        empty_handler_vtable,
-	Allocator          const a,
-	std::false_type /*generic assign*/
+	Allocator          const a
 )
 {
 	using namespace detail;
@@ -1270,25 +1263,12 @@ void callable_base<Traits>::assign
 	}
 	else
 	{
-		/// \todo This can/should be rewritten because the
-		/// small-object-optimization condition is too strict, even heap
-		/// allocated targets can be assigned directly because they have a
-		/// nothrow swap operation.
-	    ///                               (28.10.2010.) (Domagoj Saric)
-		using has_no_fail_assignement_t = std::integral_constant
-        <
-            bool,
-			functor_traits<F, buffer>::allowsSmallObjectOptimization &&
-            std::is_nothrow_assignable_v<std::remove_reference_t<F>, F>
-		>;
-
 		actual_assign<EmptyHandler>
 		(
 			std::forward<F>( f ),
 			functor_vtable,
 			empty_handler_vtable,
-			a,
-            has_no_fail_assignement_t{}
+			a
 		);
 	}
 } // void callable_base::assign()
