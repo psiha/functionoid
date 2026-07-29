@@ -883,7 +883,12 @@ protected:
         BOOST_ASSUME( p_vtable_ == &vtable );
     }
 
-	~callable_base() noexcept { destroy(); }
+	// destructor = trivial promises no target ever needs destroying (and the
+	// vtable constructor holds every assignment to that) - make the promise
+	// visible to the type system (is_trivially_destructible_v & co.) instead
+	// of merely dispatching to a no-op through the vtable.
+	~callable_base() noexcept requires ( Traits::destructor == support_level::trivial ) = default;
+	~callable_base() noexcept requires ( Traits::destructor != support_level::trivial ) { destroy(); }
 
 	template <class EmptyHandler>
 	void swap( callable_base & other, vtable const & empty_handler_vtable ) noexcept;

@@ -137,10 +137,26 @@ public: // Public function interface.
     callable( signature_type * const plain_function_pointer ) noexcept
         : function_base( no_eh_state_construction_trick_tag{}, no_eh_state_constructor{}, plain_function_pointer ) {}
 
+    // Traits-declared trivial copyability/moveability/destructibility is made
+    // real - the corresponding special member is defaulted (and therefore
+    // actually trivial, memberwise vtable pointer + buffer copy, exactly what
+    // the trivial vtable clone/move entries do) so std::is_trivially_* report
+    // the truth. Note: a trivial move is a copy - the source is left intact
+    // (as for any trivially copyable type) rather than emptied.
+    // A copyable = na instantiation is now properly uncopyable to the type
+    // system (deleted) instead of static_assert-ing on use.
+    // (The constraints are spelled mutually exclusive rather than relying on
+    // the more-constrained-wins tie-breaker: GCC and Clang disagree on it for
+    // special members.)
+    callable( callable const &   ) requires ( Traits::copyable == support_level::trivial ) = default;
+    callable( callable const &   ) requires ( Traits::copyable == support_level::na      ) = delete;
     callable( callable const & f ) noexcept( Traits::copyable >= support_level::nofail )
-        : function_base( static_cast<function_base const &>( f ), empty_handler_vtable() ) { static_assert( Traits::copyable > support_level::na, "This callable instantiation is not copyable." ); }
+        requires ( Traits::copyable != support_level::trivial && Traits::copyable != support_level::na )
+        : function_base( static_cast<function_base const &>( f ), empty_handler_vtable() ) {}
 
+	callable( callable &&   ) noexcept requires ( Traits::moveable == support_level::trivial ) = default;
 	callable( callable && f ) noexcept( Traits::moveable >= support_level::nofail )
+		requires ( Traits::moveable != support_level::trivial )
 		: function_base( static_cast<function_base &&>( f ), empty_handler_vtable() ) {}
 
     template <typename ... CallArguments>
@@ -149,8 +165,17 @@ public: // Public function interface.
         return vtable().invoke( this->functor(), std::forward< CallArguments >( args )... );
 	}
 
-    callable & operator=( callable const  & f ) noexcept( Traits::copyable >= support_level::nofail ) { static_assert( Traits::copyable > support_level::na, "This callable instantiation is not copyable." ); this->assign(            f   ); return *this; }
-    callable & operator=( callable       && f ) noexcept( Traits::moveable >= support_level::nofail ) { static_assert( Traits::moveable > support_level::na, "This callable instantiation is not moveable." ); this->assign( std::move( f ) ); return *this; }
+    // Defaulted (trivial) assignment additionally requires a trivial
+    // destructor: it overwrites the previous target without destroying it.
+    static bool constexpr trivially_copy_assignable{ Traits::copyable == support_level::trivial && Traits::destructor == support_level::trivial };
+    static bool constexpr trivially_move_assignable{ Traits::moveable == support_level::trivial && Traits::destructor == support_level::trivial };
+    callable & operator=( callable const &   )           requires trivially_copy_assignable = default;
+    callable & operator=( callable const &   )           requires ( Traits::copyable == support_level::na ) = delete;
+    callable & operator=( callable const  & f ) noexcept( Traits::copyable >= support_level::nofail )
+        requires ( !trivially_copy_assignable && Traits::copyable != support_level::na ) { this->assign( f ); return *this; }
+    callable & operator=( callable &&   )      noexcept  requires trivially_move_assignable = default;
+    callable & operator=( callable       && f ) noexcept( Traits::moveable >= support_level::nofail )
+        requires ( !trivially_move_assignable ) { static_assert( Traits::moveable > support_level::na, "This callable instantiation is not moveable." ); this->assign( std::move( f ) ); return *this; }
     callable & operator=( signature_type * const plain_function_pointer ) noexcept { this->assign( plain_function_pointer ); return *this; }
     template <typename F>
     callable & operator=( F && f ) noexcept { this->assign( std::forward<F>( f ) ); return *this; }
