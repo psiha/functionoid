@@ -1,7 +1,7 @@
 // Compile-time test: vtable attribute macros + traits metadata hook.
-#if defined( __GNUC__ ) && !defined( __clang__ )
-#    define PSI_FUNCTIONOID_DETAIL_INVOKE_FN_ATTR __attribute__( ( pure ) )
-#elif defined( __clang__ )
+// (standard attribute syntax: GCC 16 rejects a trailing GNU __attribute__ on
+// a function definition)
+#if defined( __GNUC__ )
 #    define PSI_FUNCTIONOID_DETAIL_INVOKE_FN_ATTR [[gnu::pure]]
 #endif
 
