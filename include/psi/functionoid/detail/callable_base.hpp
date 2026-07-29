@@ -696,7 +696,15 @@ vtable
     reflector    <Traits::rtti                >,
     empty_checker<Traits::dll_safe_empty_check>
 {
+    // `destructor = trivial` swaps the destroy entry for a no-op (see
+    // destroyer<support_level::trivial>), so a target that actually needs
+    // destroying - not trivially destructible, stored out-of-buffer, or both -
+    // would silently leak: neither its destructor nor its deallocation ever
+    // runs. Every manager reports whether its destroy is a no-op, so hold the
+    // declared support level to that here and the mismatch becomes a compile
+    // error at the assignment that causes it.
     template <typename ActualFunctor, typename StoredFunctor, typename Manager>
+        requires ( Traits::destructor != support_level::trivial ) || Manager::trivial_destroy
     constexpr vtable( Manager const * const manager_type, ActualFunctor const *, StoredFunctor const * const stored_functor_type, bool const is_empty_handler ) noexcept
         :
         Invoker                                    ( manager_type, stored_functor_type ),

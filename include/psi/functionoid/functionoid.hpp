@@ -189,7 +189,17 @@ private:
         return functor.vtable();
     }
 
+    // Target contracts, as constraints rather than assertions in the body: the
+    // instantiation is rejected at the call that violates it, and the failing
+    // atomic constraint is named. (The empty-handler invariant below stays a
+    // static_assert on purpose - it is an internal consistency check on this
+    // library's own types, not a contract on the caller's target.)
     template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
+        requires
+        (
+            ( std::is_copy_constructible_v<StoredFunctor> || Traits::copyable == support_level::na ) &&
+            ( std::is_nothrow_copy_constructible_v<StoredFunctor> || Traits::copyable == support_level::na || Traits::copyable == support_level::supported )
+        )
     static vtable_type const & vtable_for_functor_aux( std::false_type /*is not a callable*/, StoredFunctor const & /*functor*/ )
     {
         using namespace detail;
@@ -216,18 +226,6 @@ private:
             std::is_same<ActualFunctor, empty_handler>::value
                 ==
             std::is_same<StoredFunctor, my_empty_handler>::value
-        );
-
-        static_assert
-        (
-            std::is_copy_constructible_v<StoredFunctor> || Traits::copyable == support_level::na,
-            "This callable instantiation requires copyable targets."
-        );
-
-        static_assert
-        (
-            std::is_nothrow_copy_constructible_v<StoredFunctor> || ( Traits::copyable == support_level::na || Traits::copyable == support_level::supported ),
-            "This callable instantiation requires nothrow copy constructible targets."
         );
 
         using invoker_type = invoker<Traits::is_noexcept, ReturnType, Arguments...>;
