@@ -182,16 +182,23 @@ private:
 
     auto const & vtable() const noexcept { return reinterpret_cast<vtable_type const &>( function_base::get_vtable() ); }
 
-    //  This overload should not actually be for a 'complete' callable as it is enough
-	// for the signature template parameter to be the same (and therefor the vtable is the same, with
-	// a possible exception being the case of an empty source as empty handler vtables depend on the
-	// policy as well as the signature).
+    //  The source is itself a functionoid callable (of the same or a
+	// compatible-other Traits): assignment reuses the source's own vtable (see
+	// assign_functionoid_direct) so no vtable may be *derived* for it here -
+	// deriving one would needlessly instantiate the functor_manager machinery
+	// for the callable type (whose constraints need not hold on this path,
+	// e.g. a non-trivially-destructible source under destructor=trivial
+	// Traits) and the derived vtable would be wrong anyway: it would describe
+	// a callable wrapping the source instead of aliasing the source's target.
+	//  The source's *current* vtable is also precisely the value assign()'s
+	// is_a_callable overload assumes it is given (its same-Traits
+	// BOOST_ASSUME( &functor_vtable == f.p_vtable_ )).
     template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
-        requires std::is_base_of_v<function_base, StoredFunctor>
+        requires function_base::template is_a_callable<StoredFunctor>
     static vtable_type const & vtable_for_functor( StoredFunctor const & functor )
     {
-        static_assert( std::is_base_of_v<callable, std::remove_reference_t<ActualFunctor>> );
-        return functor.vtable();
+        static_assert( std::is_base_of_v<std::remove_reference_t<StoredFunctor>, std::remove_reference_t<ActualFunctor>> );
+        return reinterpret_cast<vtable_type const &>( functor.get_vtable() );
     }
 
     // Target contracts, as constraints rather than assertions in the body: the
@@ -202,7 +209,7 @@ private:
     template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
         requires
         (
-            !std::is_base_of_v<function_base, StoredFunctor> &&
+            !function_base::template is_a_callable<StoredFunctor> &&
             ( std::is_copy_constructible_v<StoredFunctor> || Traits::copyable == support_level::na ) &&
             ( std::is_nothrow_copy_constructible_v<StoredFunctor> || Traits::copyable == support_level::na || Traits::copyable == support_level::supported )
         )
@@ -265,7 +272,7 @@ private:
     template <bool direct, typename F>
     void do_assign( F && f )
     {
-        using functor_type = std::remove_const_t<std::remove_reference<F>>;
+        using functor_type = std::remove_const_t<std::remove_reference_t<F>>;
         using allocator    = typename Traits:: template allocator<functor_type>;
         do_assign<direct>( std::forward<F>( f ), allocator{} );
     }

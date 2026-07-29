@@ -10,6 +10,7 @@ add_executable( functionoid_smoke
     function_ref_test.cpp
     callable_move_only_test.cpp
     callable_invoke_test.cpp
+    nested_callable_test.cpp
     vtable_attrs_test.cpp
 )
 target_link_libraries( functionoid_smoke PRIVATE GTest::gtest_main Psi::Functionoid )

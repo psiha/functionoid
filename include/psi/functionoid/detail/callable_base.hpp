@@ -17,6 +17,7 @@
 #pragma once
 //------------------------------------------------------------------------------
 #include <psi/functionoid/policies.hpp>
+#include <psi/functionoid/functionoid_fwd.hpp>
 #include <psi/functionoid/detail/vtable_attrs.hpp>
 #include <psi/functionoid/rtti.hpp>
 
@@ -728,6 +729,45 @@ vtable
 template <typename Traits>
 using base_vtable = vtable<invoker<true, void>, Traits>;
 
+template <typename T>
+BOOST_FORCEINLINE bool has_empty_target( T * const funcPtr, function_ptr_tag ) noexcept { return funcPtr == 0; }
+
+template <typename T>
+BOOST_FORCEINLINE bool has_empty_target_aux( T * const funcPtr, member_ptr_tag ) noexcept { return has_empty_target<T>( funcPtr, function_ptr_tag{} ); }
+
+template <typename F>
+BOOST_FORCEINLINE bool has_empty_target_aux( F const * const f, function_obj_tag ) noexcept
+{
+    // https://stackoverflow.com/questions/16893992/check-if-type-can-be-explicitly-converted
+    if constexpr ( std::is_constructible_v<bool, F> )
+        return !static_cast<bool>( *f );
+    else
+        return false;
+}
+
+template <typename T>
+BOOST_FORCEINLINE bool has_empty_target( T const & f, function_obj_tag ) noexcept { return has_empty_target_aux( std::addressof( f ), function_obj_tag{} ); }
+
+struct callable_tag;
+
+template <class FunctionObj>
+BOOST_FORCEINLINE bool has_empty_target( std::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag ) noexcept
+{
+    // Implementation note:
+    // We save/assign a reference to a functionoid even if it is empty and let
+    // the referenced functionoid handle a possible empty invocation.
+    //                                        (28.10.2010.) (Domagoj Saric)
+    return std::is_base_of_v<callable_tag, FunctionObj>
+        ? false
+        : has_empty_target( f.get(), function_obj_tag{} );
+}
+
+template <class FunctionObj>
+BOOST_FORCEINLINE bool has_empty_target( boost::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag ) noexcept
+{
+    return has_empty_target( std::cref( f.get() ), function_obj_ref_tag{} );
+}
+
 ////////////////////////////////////////////////////////////////////////////
 struct callable_tag {};
 
@@ -934,15 +974,47 @@ protected:
 	}
 
 	// General actual assignment.
+	// Defined in-class: GCC (observed w/ 15 & 16) fails to match an
+	// out-of-class definition of this constrained template to its
+	// declaration ("no declaration matches") which silently removes it from
+	// the overload set for the code that needs it.
 	template <bool direct, typename EmptyHandler, typename FunctionObj, typename Allocator>
 		requires ( !is_a_callable<FunctionObj> )
 	void assign
 	(
-		FunctionObj       && f,
-		vtable      const &  functor_vtable,
-		vtable      const &  empty_handler_vtable,
-		Allocator
-	);
+		FunctionObj       &&       f,
+		vtable      const &        functor_vtable,
+		vtable      const &        empty_handler_vtable,
+		Allocator            const a
+	)
+	{
+		using tag = typename get_function_tag<FunctionObj>::type;
+		if ( has_empty_target( f, tag{} ) )
+			this->clear<direct, EmptyHandler>( empty_handler_vtable );
+		else
+		if constexpr ( direct )
+		{
+			// Implementation note:
+			//   See the note for the no_eh_state_constructor helper in
+			// functionoid.hpp as to why a null vtable is allowed and expected
+			// here.
+			//                                    (02.11.2010.) (Domagoj Saric)
+			BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable || /*just being constructed/inside a no_eh_state_construction_trick constructor in a debug build:*/ this->p_vtable_ == invalid_ptr );
+			using functor_manager = detail::functor_manager<std::remove_reference_t<FunctionObj>, Allocator, buffer>;
+			functor_manager::assign( std::forward<FunctionObj>( f ), this->functor_, a );
+			this->p_vtable_ = &functor_vtable;
+		}
+		else
+		{
+			actual_assign<EmptyHandler>
+			(
+				std::forward<FunctionObj>( f ),
+				functor_vtable,
+				empty_handler_vtable,
+				a
+			);
+		}
+	}
 
 	// Whether the target can be assigned in place, without a fallible
 	// intermediate, depends only on F and the buffer - so name the condition
@@ -1109,6 +1181,11 @@ private: // Assignment from another functionoid helpers.
     }
 
 private: template <typename OtherTraits> friend class callable_base;
+	// callable<>::vtable_for_functor() has to read the *source's* vtable when
+	// the source is a callable of different Traits (see the is_a_callable
+	// overload there) - grant it the same cross-instantiation access
+	// callable_base instantiations already grant each other.
+	template <typename Signature, typename OtherTraits> friend class functionoid::callable;
 	class safe_mover_base;
 	template <class EmptyHandler> class safe_mover;
 
@@ -1119,43 +1196,6 @@ private: template <typename OtherTraits> friend class callable_base;
 #ifdef BOOST_MSVC
 #    pragma warning( pop )
 #endif // BOOST_MSVC
-
-template <typename T>
-BOOST_FORCEINLINE bool has_empty_target( T * const funcPtr, function_ptr_tag ) noexcept { return funcPtr == 0; }
-
-template <typename T>
-BOOST_FORCEINLINE bool has_empty_target_aux( T * const funcPtr, member_ptr_tag ) noexcept { return has_empty_target<T>( funcPtr, function_ptr_tag{} ); }
-
-template <typename F>
-BOOST_FORCEINLINE bool has_empty_target_aux( F const * const f, function_obj_tag ) noexcept
-{
-    // https://stackoverflow.com/questions/16893992/check-if-type-can-be-explicitly-converted
-    if constexpr ( std::is_constructible_v<bool, F> )
-        return !static_cast<bool>( *f );
-    else
-        return false;
-}
-
-template <typename T>
-BOOST_FORCEINLINE bool has_empty_target( T const & f, function_obj_tag ) noexcept { return has_empty_target_aux( std::addressof( f ), function_obj_tag{} ); }
-
-template <class FunctionObj>
-BOOST_FORCEINLINE bool has_empty_target( std::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag ) noexcept
-{
-    // Implementation note:
-    // We save/assign a reference to a functionoid even if it is empty and let
-    // the referenced functionoid handle a possible empty invocation.
-    //                                        (28.10.2010.) (Domagoj Saric)
-    return std::is_base_of_v<callable_tag, FunctionObj>
-        ? false
-        : has_empty_target( f.get(), function_obj_tag{} );
-}
-
-template <class FunctionObj>
-BOOST_FORCEINLINE bool has_empty_target( boost::reference_wrapper<FunctionObj> const & f, function_obj_ref_tag ) noexcept
-{
-    return has_empty_target( std::cref( f.get() ), function_obj_ref_tag{} );
-}
 
 template <typename Traits>
 class callable_base<Traits>::safe_mover_base
@@ -1231,47 +1271,6 @@ void callable_base<Traits>::swap( callable_base & other, vtable const & empty_ha
 	my_restorer   .cancel();
 	other_restorer.cancel();
 } // void callable_base::swap()
-
-template <typename Traits>
-template <bool direct, typename EmptyHandler, typename F, typename Allocator>
-	requires ( !callable_base<Traits>::template is_a_callable<F> )
-void callable_base<Traits>::assign
-(
-	F               &&       f,
-	vtable    const &        functor_vtable,
-	vtable    const &        empty_handler_vtable,
-	Allocator          const a
-)
-{
-	using namespace detail;
-
-	using tag = typename get_function_tag<F>::type;
-	if ( has_empty_target( f, tag{} ) )
-		this->clear<direct, EmptyHandler>( empty_handler_vtable );
-	else
-	if constexpr ( direct )
-	{
-        // Implementation note:
-        //   See the note for the no_eh_state_constructor helper in
-        // functionoid.hpp as to why a null vtable is allowed and expected
-        // here.
-        //                                    (02.11.2010.) (Domagoj Saric)
-        BOOST_ASSERT( this->p_vtable_ == &empty_handler_vtable || /*just being constructed/inside a no_eh_state_construction_trick constructor in a debug build:*/ this->p_vtable_ == invalid_ptr );
-		using functor_manager = functor_manager<std::remove_reference_t<F>, Allocator, buffer>;
-		functor_manager::assign( std::forward<F>( f ), this->functor_, a );
-		this->p_vtable_ = &functor_vtable;
-	}
-	else
-	{
-		actual_assign<EmptyHandler>
-		(
-			std::forward<F>( f ),
-			functor_vtable,
-			empty_handler_vtable,
-			a
-		);
-	}
-} // void callable_base::assign()
 
 //------------------------------------------------------------------------------
 } // namespace detail
