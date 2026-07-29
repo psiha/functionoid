@@ -102,7 +102,7 @@ private: // Private implementation types.
     struct no_eh_state_constructor
     {
         template <typename F, typename Allocator>
-        base_vtable const & operator()( function_base & base, F && f, Allocator const a ) const noexcept( std::is_nothrow_constructible<std::remove_reference_t<F>, F>::value )
+        base_vtable const & operator()( function_base & base, F && f, Allocator const a ) const noexcept( std::is_nothrow_constructible_v<std::remove_reference_t<F>, F> )
         {
             detail::debug_clear( base );
             static_cast<callable &>( base ).do_assign<true>( std::forward<F>( f ), a );
@@ -110,7 +110,7 @@ private: // Private implementation types.
         }
 
         template <typename F>
-        base_vtable const & operator()( function_base & base, F && f ) const noexcept( std::is_nothrow_constructible<std::remove_reference_t<F>, F>::value )
+        base_vtable const & operator()( function_base & base, F && f ) const noexcept( std::is_nothrow_constructible_v<std::remove_reference_t<F>, F> )
         {
 		    using NakedFunctionObj = std::remove_const_t<std::remove_reference_t<F>>;
 		    return (*this)( base, std::forward<F>( f ), typename Traits:: template allocator<NakedFunctionObj>() );
@@ -122,8 +122,12 @@ private: // Private implementation types.
 public: // Public function interface.
     callable() noexcept : function_base( empty_handler_vtable(), empty_handler{} ) {}
 
-    template <typename Functor> // SFINAE/enable if required by MSVC 16 for construction from a callable & (mutable reference)
-    callable( Functor && f, std::enable_if_t< !std::is_same_v< std::decay_t<Functor>, callable > > * = nullptr ) noexcept( std::is_nothrow_constructible_v<std::decay_t<Functor>, Functor> /*...mrmlj...&& !is_heap_allocated*/ )
+    // Constrained (rather than SFINAE'd through a defaulted dummy parameter)
+    // so it does not hide the copy/move constructors for a `callable &` - the
+    // original reason this needed excluding at all.
+    template <typename Functor>
+        requires ( !std::is_same_v<std::decay_t<Functor>, callable> )
+    callable( Functor && f ) noexcept( std::is_nothrow_constructible_v<std::decay_t<Functor>, Functor> /*...mrmlj...&& !is_heap_allocated*/ )
         : function_base( no_eh_state_construction_trick_tag{}, no_eh_state_constructor{}, std::forward<Functor>( f ) ) {}
 
     template <typename Functor, typename Allocator>
@@ -182,8 +186,9 @@ private:
 	// for the signature template parameter to be the same (and therefor the vtable is the same, with
 	// a possible exception being the case of an empty source as empty handler vtables depend on the
 	// policy as well as the signature).
-    template <typename Allocator, typename ActualFunctor>
-    static vtable_type const & vtable_for_functor_aux( std::true_type /*is a callable*/, callable const & functor )
+    template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
+        requires std::is_base_of_v<function_base, StoredFunctor>
+    static vtable_type const & vtable_for_functor( StoredFunctor const & functor )
     {
         static_assert( std::is_base_of_v<callable, std::remove_reference_t<ActualFunctor>> );
         return functor.vtable();
@@ -197,10 +202,11 @@ private:
     template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
         requires
         (
+            !std::is_base_of_v<function_base, StoredFunctor> &&
             ( std::is_copy_constructible_v<StoredFunctor> || Traits::copyable == support_level::na ) &&
             ( std::is_nothrow_copy_constructible_v<StoredFunctor> || Traits::copyable == support_level::na || Traits::copyable == support_level::supported )
         )
-    static vtable_type const & vtable_for_functor_aux( std::false_type /*is not a callable*/, StoredFunctor const & /*functor*/ )
+    static vtable_type const & vtable_for_functor( StoredFunctor const & /*functor*/ )
     {
         using namespace detail;
 
@@ -208,12 +214,12 @@ private:
         // my_empty_handler (anti-code-bloat) because they only differ in the
         // operator() member function which is irrelevant for/not used by the
         // manager.
-        using is_empty_handler = std::is_same<ActualFunctor, empty_handler>;
+        static bool constexpr is_empty_handler{ std::is_same_v<ActualFunctor, empty_handler> };
         using manager_type = functor_manager
         <
             std::conditional_t
             <
-                is_empty_handler::value,
+                is_empty_handler,
                 ActualFunctor,
                 StoredFunctor
             >,
@@ -223,9 +229,9 @@ private:
 
         static_assert
         (
-            std::is_same<ActualFunctor, empty_handler>::value
+            std::is_same_v<ActualFunctor, empty_handler>
                 ==
-            std::is_same<StoredFunctor, my_empty_handler>::value
+            std::is_same_v<StoredFunctor, my_empty_handler>
         );
 
         using invoker_type = invoker<Traits::is_noexcept, ReturnType, Arguments...>;
@@ -241,20 +247,10 @@ private:
             static_cast<manager_type  const *>( nullptr ),
             static_cast<ActualFunctor const *>( nullptr ),
             static_cast<StoredFunctor const *>( nullptr ),
-            is_empty_handler::value
+            is_empty_handler
         };
         return the_vtable;
-    } // vtable_for_functor_aux()
-
-    template <typename Allocator, typename ActualFunctor, typename StoredFunctor>
-    static vtable_type const & vtable_for_functor( StoredFunctor const & functor )
-    {
-        return vtable_for_functor_aux<Allocator, ActualFunctor>
-        (
-            std::is_base_of<function_base, StoredFunctor>(),
-            functor
-        );
-    }
+    } // vtable_for_functor()
 
     // ...direct actually means whether to skip pre-destruction (when not
     // assigning but constructing) so it should probably be renamed to
@@ -304,8 +300,7 @@ private:
             std::forward<StoredFunctor>( stored_functor ),
             vtable_for_functor<StoredFunctorAllocator, ActualFunctor>( stored_functor ),
             empty_handler_vtable(),
-            StoredFunctorAllocator( a ),
-            std::is_base_of<detail::callable_tag, NakedStoredFunctor>{} /*are we assigning another callable?*/
+            StoredFunctorAllocator( a )
         );
     }
 }; // class callable
