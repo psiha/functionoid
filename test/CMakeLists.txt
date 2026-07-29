@@ -1,4 +1,8 @@
-CPMAddPackage( "gh:google/googletest@1.15.2" )
+# master, not the 1.17.0 release: releases up to and including it print a
+# char8_t by ImplicitCast_ to char32_t, which recent clang rejects under
+# -Wcharacter-conversion (googletest#4762 - fixed on master by switching to
+# static_cast).
+CPMAddPackage( "gh:google/googletest#main" )
 include( GoogleTest )
 
 add_executable( functionoid_smoke

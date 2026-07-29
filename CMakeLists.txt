@@ -19,7 +19,9 @@ endif()
 
 include( ${CMAKE_CURRENT_BINARY_DIR}/cmake/get_cpm.cmake )
 
-set( boost_ver boost-1.90.0 )
+# newest STABLE Boost release; deliberately not boost-1.92.0.beta1, and not
+# master - a released tag is reproducible where a branch tip is not.
+set( boost_ver boost-1.91.0 )
 CPMAddPackage( "gh:boostorg/static_assert#${boost_ver}"   )
 CPMAddPackage( "gh:boostorg/throw_exception#${boost_ver}" )
 CPMAddPackage( "gh:boostorg/config#${boost_ver}"          )
