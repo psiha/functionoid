@@ -20,8 +20,10 @@
 #include <boost/config_ex.hpp>
 #include <boost/throw_exception.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 //------------------------------------------------------------------------------
 namespace psi::functionoid
@@ -68,6 +70,20 @@ template <> inline void assert_on_empty::handle_empty_invoke<void>() noexcept { 
 ////////////////////////////////////////////////////////////////////////////////
 struct nop_on_empty { template <class result_type> static result_type handle_empty_invoke() noexcept { return {}; } };
 template <> inline void nop_on_empty::handle_empty_invoke<void>() noexcept {}
+
+///   How an assignment publishes the new target: unset - the default -
+/// defers to Traits::concurrent_reads; set, it is the per-call opt-in and the
+/// publishing store is made atomically with the given ordering even for Traits
+/// that did not opt in.
+///   Use it when a callable type is overwhelmingly single-threaded but ONE
+/// site needs the publish-once pattern: the trait is per-type and would tax
+/// every other use (and, because it makes the invoke path atomic too, it costs
+/// far more than the store - see concurrent_reads). This is the same trade
+/// std::atomic_ref itself offers, and it carries the same caller obligation:
+/// while an ordered access is in flight, every conflicting access to that
+/// object must also be ordered. Prefer the trait when in doubt - it makes that
+/// hold by construction rather than by discipline.
+using publish_order = std::optional<std::memory_order>;
 
 enum struct support_level : std::uint8_t
 {
