@@ -194,6 +194,21 @@ public: // Public function interface.
     /// Determine if the function is empty (i.e. has an empty target).
     bool empty() const noexcept { return function_base::empty( &empty_handler_vtable() ); }
 
+    ///   Same question, asked from a thread that may be racing the one which
+    /// assigns the target - available only for Traits::concurrent_reads (see
+    /// policies.hpp for what the opt-in costs and, more importantly, what it
+    /// does and does not make safe).
+    ///   memory_order_acquire is the ordering that makes the answer usable:
+    /// a false result then also orders the target itself, so reading it
+    /// afterwards - invoking it, target()-ing it - is race-free with respect to
+    /// the assignment that published it. memory_order_relaxed answers the
+    /// question alone and orders nothing else.
+    bool empty( std::memory_order const order ) const noexcept
+        requires ( Traits::concurrent_reads )
+    {
+        return function_base::empty( &empty_handler_vtable(), order );
+    }
+
     void swap( callable & other ) noexcept
     {
         static_assert( sizeof( callable ) == sizeof( function_base ), "Internal inconsistency" );
