@@ -44,12 +44,27 @@ using plain_fn      = pf::callable<int(), pf::default_traits          >;
 using concurrent_fn = pf::callable<int(), concurrent_traits           >;
 using trivial_fn    = pf::callable<int(), trivial_concurrent_traits   >;
 
-// The overload is opt-in: absent unless the Traits ask for it.
+// The ordered accessors are available to every Traits - asking for an ordering
+// IS the per-call opt-in. What concurrent_reads adds is that the type's own
+// internal accesses become ordered too, so the guarantee holds by construction
+// rather than by caller discipline.
 template <typename Callable>
-concept has_ordered_empty = requires ( Callable const & c ) { c.empty( std::memory_order_acquire ); };
+concept has_ordered_empty  = requires ( Callable const & c ) { c.empty( std::memory_order_acquire ); };
+template <typename Callable>
+concept has_ordered_assign = requires ( Callable & c ) { c.assign( +[]{ return 0; }, std::memory_order_release ); };
 
-static_assert( !has_ordered_empty<plain_fn     > );
-static_assert(  has_ordered_empty<concurrent_fn> );
+static_assert( has_ordered_empty <plain_fn     > );
+static_assert( has_ordered_empty <concurrent_fn> );
+static_assert( has_ordered_assign<plain_fn     > );
+static_assert( has_ordered_assign<concurrent_fn> );
+
+// ...but there is deliberately NO ordered clear: a release store orders the
+// writes that precede it, and disengagement has none. See clear()'s comment.
+template <typename Callable>
+concept has_ordered_clear = requires ( Callable & c ) { c.clear( std::memory_order_release ); };
+
+static_assert( !has_ordered_clear<plain_fn     > );
+static_assert( !has_ordered_clear<concurrent_fn> );
 
 // The whole point of publishing through the vtable pointer rather than an added
 // atomic member: no size cost, and no loss of triviality.
@@ -143,6 +158,69 @@ TEST( ConcurrentReads, PublishOnceIsObservedWithItsTarget )
             go.store( true, std::memory_order_release );
             go.notify_all();
             function = [ round ] { return round; };
+        } };
+
+        pollers.clear(); // join
+        writer .join ();
+
+        EXPECT_EQ( observed.load( std::memory_order_relaxed ), round * readers );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Per-call opt-in: the same publish-once discipline on Traits that did NOT set
+// concurrent_reads. The point is that a type used single-threaded everywhere
+// else pays nothing - only this site is ordered.
+// ---------------------------------------------------------------------------
+
+TEST( PerCallPublishOrder, OrderedEmptyAgreesWithPlainEmptyOnPlainTraits )
+{
+    plain_fn f;
+    EXPECT_TRUE( f.empty(                           ) );
+    EXPECT_TRUE( f.empty( std::memory_order_acquire ) );
+
+    f.assign( +[]{ return 5; }, std::memory_order_release );
+    EXPECT_FALSE( f.empty(                           ) );
+    EXPECT_FALSE( f.empty( std::memory_order_acquire ) );
+    EXPECT_EQ   ( f(), 5 );
+
+    f.clear();
+    EXPECT_TRUE( f.empty( std::memory_order_acquire ) );
+}
+
+// The opt-in must not cost the type anything it did not already pay.
+static_assert( sizeof( plain_fn ) == sizeof( concurrent_fn ) );
+
+// Publish-once on plain Traits: identical to the concurrent_traits case above,
+// but the ordering comes from the two annotated calls rather than the type.
+TEST( PerCallPublishOrder, PublishOnceIsObservedWithItsTargetOnPlainTraits )
+{
+    static constexpr auto readers{ 4 };
+
+    for ( auto round{ 0 }; round < 64; ++round )
+    {
+        auto const p_function{ std::make_unique<plain_fn>() };
+        auto     & function  { *p_function };
+
+        std::atomic<bool> go{ false };
+        std::atomic<int > observed{ 0 };
+
+        std::vector<std::jthread> pollers;
+        for ( auto reader{ 0 }; reader < readers; ++reader )
+        {
+            pollers.emplace_back( [&]
+            {
+                go.wait( false, std::memory_order_acquire );
+                while ( function.empty( std::memory_order_acquire ) ) { std::this_thread::yield(); }
+                observed.fetch_add( function(), std::memory_order_relaxed );
+            } );
+        }
+
+        std::jthread writer{ [&]
+        {
+            go.store( true, std::memory_order_release );
+            go.notify_all();
+            function.assign( [ round ] { return round; }, std::memory_order_release );
         } };
 
         pollers.clear(); // join
