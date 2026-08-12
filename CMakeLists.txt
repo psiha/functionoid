@@ -47,6 +47,15 @@ endif()
 include( ${build_SOURCE_DIR}/build_options.cmake )
 
 set( CMAKE_CXX_STANDARD 26 )
+if ( CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" )
+    # CMake has no cxx_std_26 mapping for MSVC: CMAKE_CXX_STANDARD alone is
+    # silently DROPPED (the compile then fails far away, complaining that
+    # nested namespace definitions need /std:c++17), and asking for
+    # CMAKE_CXX_STANDARD_REQUIRED turns that into a hard configure error
+    # instead. Request the dialect explicitly. Clang-CL reports "Clang" and
+    # needs none of this - CMake knows its flags.
+    add_compile_options( /std:c++latest )
+endif()
 add_compile_definitions( BOOST_ALL_NO_LIB )
 if ( WIN32 )
     add_compile_definitions( WIN32_LEAN_AND_MEAN NOMINMAX )
