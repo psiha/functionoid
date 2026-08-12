@@ -186,10 +186,67 @@ public: // Public function interface.
     template <typename F, typename Allocator>
     void assign( F && f, Allocator const a ) { this->do_assign<false>( std::forward<F>( f ), a ); }
 
+    ///   Assign and publish the new target with an explicit ordering - the
+    /// per-call counterpart of Traits::concurrent_reads, available whether or
+    /// not the Traits opted in (see publish_order in policies.hpp for what the
+    /// caller then owes).
+    ///   memory_order_release is the meaningful choice: the target buffer is
+    /// written before the vtable pointer, so a release on that store is what
+    /// makes a concurrent empty( memory_order_acquire ) observer see a target
+    /// that is fully constructed.
+    ///   \pre The callable is EMPTY. This overload ARMS a callable exactly
+    /// once; it is not a general ordered assignment, and the restriction is
+    /// the mechanism's, not an implementation shortcut:
+    ///   * A release store publishes the writes that PRECEDE it. Re-arming an
+    ///     already-armed callable would publish a target whose predecessor a
+    ///     concurrent prober may have observed and be invoking right now, and
+    ///     the reassignment destroys it under that reader. No memory ordering
+    ///     closes that window - it needs deferred reclamation (refcounting,
+    ///     RCU grace periods, hazard pointers), which a callable does not and
+    ///     should not carry.
+    ///   * So the only race-free transition is empty -> armed, once. Readers
+    ///     poll empty( acquire ) and, on observing engagement, may use the
+    ///     target for as long as it is never re-armed or cleared.
+    ///   Implemented via the `direct` path, whose publication is EXACTLY ONE
+    /// store - the ordered one - and whose own precondition is this same
+    /// emptiness (it skips pre-destruction because there is nothing to
+    /// destroy). The ordinary route would not do: its general, may-throw case
+    /// publishes through swap(), i.e. several plain stores, one of which hands
+    /// a concurrent prober an engaged vtable with no ordering behind it
+    /// (ThreadSanitizer confirms the race).
+    template <typename F>
+    void assign( F && f, std::memory_order const publish )
+    {
+        BOOST_ASSERT_MSG( this->empty(), "ordered assign arms an EMPTY callable - re-arming races its readers" );
+        this->do_assign<true>( std::forward<F>( f ), publish_order{ publish } );
+    }
+
+    template <typename F, typename Allocator>
+    void assign( F && f, Allocator const a, std::memory_order const publish )
+    {
+        BOOST_ASSERT_MSG( this->empty(), "ordered assign arms an EMPTY callable - re-arming races its readers" );
+        this->do_assign<true>( std::forward<F>( f ), a, publish_order{ publish } );
+    }
+
     void assign( std::nullptr_t ) noexcept { clear(); }
 
     /// Clear out a target (replace it with an empty handler), if there is one.
     void clear() { function_base:: template clear<false, empty_handler>( empty_handler_vtable() ); }
+
+    ///   There is deliberately no clear( std::memory_order ). A release store
+    /// orders the writes that precede it, and disengagement has none to order
+    /// - so an "ordered clear" would publish nothing while reading as though
+    /// it made disarming safe. It does not: a prober that observed engagement
+    /// beforehand may be invoking the target that clear() is destroying, which
+    /// is a reclamation problem, not an ordering one.
+    ///   Same conclusion the Linux kernel reached for the identical shape:
+    /// rcu_assign_pointer() degrades to a plain WRITE_ONCE() when publishing
+    /// NULL, precisely because there is nothing to order (commit "rcu: No
+    /// ordering for rcu_assign_pointer() of NULL"). RCU then keeps removal on
+    /// an entirely separate mechanism - grace periods - rather than pretending
+    /// a store ordering can retire an object.
+    ///   Disarm therefore requires the callable to be quiesced by other means,
+    /// at which point plain clear() is exactly right.
 
     /// Determine if the function is empty (i.e. has an empty target).
     bool empty() const noexcept { return function_base::empty( &empty_handler_vtable() ); }
@@ -204,7 +261,6 @@ public: // Public function interface.
     /// the assignment that published it. memory_order_relaxed answers the
     /// question alone and orders nothing else.
     bool empty( std::memory_order const order ) const noexcept
-        requires ( Traits::concurrent_reads )
     {
         return function_base::empty( &empty_handler_vtable(), order );
     }
@@ -303,30 +359,31 @@ private:
     // assigning but constructing) so it should probably be renamed to
     // pre_destroy or the whole thing solved in some smarter way...
     template <bool direct, typename F, typename Allocator>
-    void do_assign( F && f, Allocator const a )
+        requires ( !std::same_as<Allocator, publish_order> ) // else a 2-arg do_assign( f, publish ) is ambiguous with the overload below
+    void do_assign( F && f, Allocator const a, publish_order const publish = {} )
     {
         using tag = typename detail::get_function_tag<F>::type;
-        dispatch_assign<direct>( std::forward<F>( f ), a, tag{} );
+        dispatch_assign<direct>( std::forward<F>( f ), a, tag{}, publish );
     }
 
     template <bool direct, typename F>
-    void do_assign( F && f )
+    void do_assign( F && f, publish_order const publish = {} )
     {
         using functor_type = std::remove_const_t<std::remove_reference_t<F>>;
         using allocator    = typename Traits:: template allocator<functor_type>;
-        do_assign<direct>( std::forward<F>( f ), allocator{} );
+        do_assign<direct>( std::forward<F>( f ), allocator{}, publish );
     }
 
     template <bool direct, typename F, typename Allocator>
-    void dispatch_assign( F && f   , Allocator const a, detail::function_obj_tag     ) { do_assign<direct>( std::forward<F>( f ), std::forward<F>( f ), a ); }
+    void dispatch_assign( F && f   , Allocator const a, detail::function_obj_tag    , publish_order const publish = {} ) { do_assign<direct>( std::forward<F>( f ), std::forward<F>( f ), a, publish ); }
     // Explicit support for member function objects, so we invoke through
     // mem_fn() but retain the right target_type() values.
     template <bool direct, typename F, typename Allocator>
-    void dispatch_assign( F const f, Allocator const a, detail::member_ptr_tag       ) { do_assign<direct                  >( f      , mem_fn( f ), a ); }
+    void dispatch_assign( F const f, Allocator const a, detail::member_ptr_tag      , publish_order const publish = {} ) { do_assign<direct                  >( f      , mem_fn( f ), a, publish ); }
     template <bool direct, typename F, typename Allocator>
-    void dispatch_assign( F const f, Allocator const a, detail::function_obj_ref_tag ) { do_assign<direct, typename F::type>( f.get(),         f  , a ); }
+    void dispatch_assign( F const f, Allocator const a, detail::function_obj_ref_tag, publish_order const publish = {} ) { do_assign<direct, typename F::type>( f.get(),         f  , a, publish ); }
     template <bool direct, typename F, typename Allocator>
-    void dispatch_assign( F       f, Allocator const a, detail::function_ptr_tag     )
+    void dispatch_assign( F       f, Allocator const a, detail::function_ptr_tag    , publish_order const publish = {} )
     {
         // Plain function pointers need special care because when assigned
         // using the syntax without the ampersand they wreck havoc with certain
@@ -334,11 +391,11 @@ private:
         // behaviour, e.g. not invoking the assigned target with GCC 4.0.1 or
         // causing access-violation crashes with MSVC (tested 8 and 10).
         using non_const_function_pointer_t = std::add_pointer_t<std::remove_const_t<std::remove_pointer_t<F>>>;
-        do_assign<direct, non_const_function_pointer_t, non_const_function_pointer_t>( f, std::move( f ), a );
+        do_assign<direct, non_const_function_pointer_t, non_const_function_pointer_t>( f, std::move( f ), a, publish );
     }
 
     template <bool direct, typename ActualFunctor, typename StoredFunctor, typename ActualFunctorAllocator>
-    void do_assign( ActualFunctor const &, StoredFunctor && stored_functor, ActualFunctorAllocator const a )
+    void do_assign( ActualFunctor const &, StoredFunctor && stored_functor, ActualFunctorAllocator const a, publish_order const publish )
     {
 		using NakedStoredFunctor     = std::remove_const_t<std::remove_reference_t<StoredFunctor>>;
         using StoredFunctorAllocator = typename std::allocator_traits<ActualFunctorAllocator>::template rebind_alloc<NakedStoredFunctor>;
@@ -347,7 +404,8 @@ private:
             std::forward<StoredFunctor>( stored_functor ),
             vtable_for_functor<StoredFunctorAllocator, ActualFunctor>( stored_functor ),
             empty_handler_vtable(),
-            StoredFunctorAllocator( a )
+            StoredFunctorAllocator( a ),
+            publish
         );
     }
 }; // class callable

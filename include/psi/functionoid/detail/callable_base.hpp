@@ -846,7 +846,7 @@ private: // Private helper guard classes.
 					empty_handler_traits::allowsSmallObjectOptimization
 				);
 				empty_handler_manager::assign( EmptyHandler(), p_function_->functor_, std::allocator<EmptyHandler>() );
-				p_function_->store_vtable( &empty_handler_vtable_ );
+				p_function_->store_vtable( empty_handler_vtable_ );
 			}
 		}
 
@@ -881,7 +881,7 @@ protected:
     callable_base( no_eh_state_construction_trick_tag, Constructor const constructor, Args && ... args ) noexcept( noexcept( constructor( std::declval<callable_base &>(), std::forward<Args>( args )... ) ) )
     {
         auto const & vtable( constructor( *this, std::forward<Args>( args )... ) );
-        BOOST_ASSUME( load_vtable( std::memory_order_relaxed ) == &vtable );
+        BOOST_ASSUME( vtable_slot( std::memory_order_relaxed ) == &vtable );
     }
 
 	// destructor = trivial promises no target ever needs destroying (and the
@@ -900,10 +900,11 @@ protected:
     /// Engagement probe for a reader that may race the thread which assigns to
     /// this callable. Only the vtable pointer load is ordered - what it orders
     /// is the target buffer written before it (see store_vtable()).
+    ///   Always atomic, whatever Traits::concurrent_reads says: an explicitly
+    /// ordered read is the caller opting in for this call.
     bool empty( void const * const p_empty_handler_vtable, std::memory_order const order ) const noexcept
-        requires ( Traits::concurrent_reads )
     {
-        auto const p_vtable{ load_vtable( order ) };
+        auto const p_vtable{ atomic_load_vtable( order ) };
         BOOST_ASSUME( p_vtable );
         return p_vtable->is_empty_handler_vtable( p_empty_handler_vtable );
     }
@@ -934,26 +935,62 @@ protected:
     /// entire API surface, a single memory_order overload does not)
     /// http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2015/p0045r0.pdf
     ///                                       (08.11.2016.) (Domagoj Saric)
-    vtable const * load_vtable( std::memory_order const order ) const noexcept
+    ///   Unconditionally atomic accessors - the per-call opt-in. A caller that
+    /// asks for an ordering gets it whether or not the Traits opted in, which
+    /// is what makes a single publish-once site usable without taxing every
+    /// other instantiation of the type (see policies.hpp).
+    ///   The const_cast strips the member's cv/__restrict qualification:
+    /// std::atomic_ref binds to neither, and both concern the *pointee* (the
+    /// vtable) rather than this pointer's own storage, so nothing they promise
+    /// is being broken. It is also what lets the member itself stay exactly as
+    /// it always was - no conditional type, no `mutable`.
+    ///   ⚠ The caller owns the contract std::atomic_ref itself imposes: while an
+    /// ordered access is in flight, every *conflicting* access to this object
+    /// must also be ordered. Traits::concurrent_reads is the way to have that
+    /// hold by construction.
+    vtable const * atomic_load_vtable( std::memory_order const order ) const noexcept
     {
-        if constexpr ( Traits::concurrent_reads ) { return std::atomic_ref{ p_vtable_ }.load( order ); }
+        return std::atomic_ref{ *const_cast<vtable const **>( &p_vtable_ ) }.load( order );
+    }
+    void atomic_store_vtable( vtable const & vt, std::memory_order const order ) noexcept
+    {
+        std::atomic_ref{ *const_cast<vtable const **>( &p_vtable_ ) }.store( &vt, order );
+    }
+
+    ///   The raw slot read: what the pointer currently HOLDS, which mid
+    /// construction is legitimately not a vtable at all (debug_clear's
+    /// invalid_ptr) - hence a pointer, and hence separate from load_vtable().
+    /// The identity/validity assertions are its only callers.
+    vtable const * vtable_slot( std::memory_order const order ) const noexcept
+    {
+        if constexpr ( Traits::concurrent_reads ) { return atomic_load_vtable( order ); }
         else                                      { return p_vtable_; }
+    }
+
+    vtable const & load_vtable( std::memory_order const order ) const noexcept
+    {
+        auto const p_vtable{ vtable_slot( order ) };
+        BOOST_ASSUME( p_vtable );
+        return *p_vtable;
     }
 
     ///   The publishing store. Every assignment path writes the target buffer
     /// _first_ and the vtable pointer last, so this release store is exactly
     /// the edge a reader's acquire load of it needs: observing a non-empty
     /// vtable implies the target it describes is fully constructed.
-    ///   Deliberately not exposed with a memory_order parameter: a weaker
-    /// publish would defeat the mechanism, so there is no legitimate choice for
-    /// a caller to make - only a way to get it wrong.
-    void store_vtable( vtable const * const p_vtable ) noexcept
+    ///   `order` unset (the default) means "let the Traits decide" - a release
+    /// store for concurrent_reads, a plain one otherwise. Set, it is the
+    /// per-call opt-in and always publishes atomically. There is deliberately
+    /// no way to ask for something *weaker* than the Traits already give: a
+    /// weaker publish only defeats the mechanism.
+    void store_vtable( vtable const & vt, publish_order const order = {} ) noexcept
     {
-        if constexpr ( Traits::concurrent_reads ) { std::atomic_ref{ p_vtable_ }.store( p_vtable, std::memory_order_release ); }
-        else                                      { p_vtable_ = p_vtable; }
+        if ( order ) { atomic_store_vtable( vt, *order ); return; }
+        if constexpr ( Traits::concurrent_reads ) { atomic_store_vtable( vt, std::memory_order_release ); }
+        else                                      { p_vtable_ = &vt; }
     }
 
-	auto const & get_vtable() const noexcept { auto const p_vtable{ load_vtable( std::memory_order_relaxed ) }; BOOST_ASSUME( p_vtable ); return *p_vtable; }
+	auto const & get_vtable() const noexcept { return load_vtable( std::memory_order_relaxed ); }
 
 	buffer & functor() const noexcept { return functor_; }
 
@@ -987,24 +1024,25 @@ protected:
         [[ maybe_unused ]]
 		vtable      const &  functor_vtable,
 		vtable      const &  empty_handler_vtable,
-		Allocator
+		Allocator,
+		publish_order        const publish = {}
 	)
 	{
         auto const same_traits{ std::is_convertible_v<std::decay_t<FunctionObj> *, callable_base const *> };
         if constexpr ( same_traits )
         {
-		    BOOST_ASSUME( &functor_vtable == f.load_vtable( std::memory_order_relaxed ) );
+		    BOOST_ASSUME( &functor_vtable == f.vtable_slot( std::memory_order_relaxed ) );
         }
 		if constexpr ( direct )
 		{
 		    BOOST_ASSUME( &f != static_cast<callable_tag const *>( this ) );
 			BOOST_ASSERT
             (
-                ( this->load_vtable( std::memory_order_relaxed ) == &empty_handler_vtable ) ||
+                ( this->vtable_slot( std::memory_order_relaxed ) == &empty_handler_vtable ) ||
                 // just being constructed/inside a no_eh_state_construction_trick constructor in a debug build:
-                ( this->load_vtable( std::memory_order_relaxed ) == invalid_ptr )
+                ( this->vtable_slot( std::memory_order_relaxed ) == invalid_ptr )
             );
-			assign_functionoid_direct( std::forward<FunctionObj>( f ), empty_handler_vtable );
+			assign_functionoid_direct( std::forward<FunctionObj>( f ), empty_handler_vtable, publish );
 		}
 		else
 		{
@@ -1012,7 +1050,7 @@ protected:
             if constexpr ( same_traits && ( Traits::destructor != support_level::trivial ) )
                 if ( BOOST_UNLIKELY( &f == this ) )
                     return;
-			assign_functionoid_guarded<EmptyHandler>( std::forward<FunctionObj>( f ), empty_handler_vtable );
+			assign_functionoid_guarded<EmptyHandler>( std::forward<FunctionObj>( f ), empty_handler_vtable, publish );
 		}
 	}
 
@@ -1028,7 +1066,8 @@ protected:
 		FunctionObj       &&       f,
 		vtable      const &        functor_vtable,
 		vtable      const &        empty_handler_vtable,
-		Allocator            const a
+		Allocator            const a,
+		publish_order        const publish = {}
 	)
 	{
 		using tag = typename get_function_tag<FunctionObj>::type;
@@ -1042,10 +1081,10 @@ protected:
 			// functionoid.hpp as to why a null vtable is allowed and expected
 			// here.
 			//                                    (02.11.2010.) (Domagoj Saric)
-			BOOST_ASSERT( this->load_vtable( std::memory_order_relaxed ) == &empty_handler_vtable || /*just being constructed/inside a no_eh_state_construction_trick constructor in a debug build:*/ this->load_vtable( std::memory_order_relaxed ) == invalid_ptr );
+			BOOST_ASSERT( this->vtable_slot( std::memory_order_relaxed ) == &empty_handler_vtable || /*just being constructed/inside a no_eh_state_construction_trick constructor in a debug build:*/ this->vtable_slot( std::memory_order_relaxed ) == invalid_ptr );
 			using functor_manager = detail::functor_manager<std::remove_reference_t<FunctionObj>, Allocator, buffer>;
 			functor_manager::assign( std::forward<FunctionObj>( f ), this->functor_, a );
-			this->store_vtable( &functor_vtable );
+			this->store_vtable( functor_vtable, publish );
 		}
 		else
 		{
@@ -1054,7 +1093,8 @@ protected:
 				std::forward<FunctionObj>( f ),
 				functor_vtable,
 				empty_handler_vtable,
-				a
+				a,
+				publish
 			);
 		}
 	}
@@ -1082,13 +1122,14 @@ protected:
 		F               &&      f,
 		vtable    const &       functor_vtable,
 		vtable    const &     /*empty_handler_vtable*/,
-		Allocator         const a
+		Allocator         const a,
+		publish_order     const publish = {}
 	) noexcept
 	{
 		using functor_manager = functor_manager<F, Allocator, buffer>;
 		this->destroy();
 		functor_manager::assign( std::forward<F>( f ), this->functor_, a );
-		this->store_vtable( &functor_vtable );
+		this->store_vtable( functor_vtable, publish );
 	}
 
 	template <typename EmptyHandler, typename F, typename Allocator>
@@ -1098,32 +1139,43 @@ protected:
 		F               &&       f,
 		vtable    const &        functor_vtable,
 		vtable    const &        empty_handler_vtable,
-		Allocator          const a
+		Allocator          const a,
+		publish_order      const publish = {}
 	)
 	{
+		//   This path publishes through swap(), i.e. several plain stores, so
+		// it cannot honour a requested ordering: a concurrent prober could be
+		// handed an engaged vtable by one of the intermediate stores, with
+		// nothing ordering the target behind it (ThreadSanitizer confirms).
+		// The per-call opt-in therefore routes around it - callable::assign(
+		// f, memory_order ) clears and then takes the `direct` path, whose
+		// publication is a single store. Nothing should arrive here with an
+		// ordering request.
+		BOOST_ASSERT( !publish );
+		boost::ignore_unused( publish );
 		// This most generic case needs to be reworked [currently does redundant
 		// copying (through the vtable function pointers) and does not use all
 		// the type information it could...]...
 		using functor_manager = functor_manager<std::remove_reference_t<F>, Allocator, buffer>;
 		callable_base tmp( empty_handler_vtable, EmptyHandler() );
 		functor_manager::assign( std::forward<F>( f ), tmp.functor_, a );
-		tmp.store_vtable( &functor_vtable );
+		tmp.store_vtable( functor_vtable );
 		this->swap<EmptyHandler>( tmp, empty_handler_vtable );
 	}
 
 private: // Assignment from another functionoid helpers.
-	void assign_functionoid_direct( callable_base const & source, vtable const & /*empty_handler_vtable*/ ) noexcept( Traits::copyable >= support_level::nofail )
+	void assign_functionoid_direct( callable_base const & source, vtable const & /*empty_handler_vtable*/, publish_order const publish = {} ) noexcept( Traits::copyable >= support_level::nofail )
 	{
         static_assert( Traits::copyable != support_level::na, "Callable not copyable" );
 		source.get_vtable().clone( source.functor_, this->functor_ );
-		store_vtable( &source.get_vtable() );
+		store_vtable( source.get_vtable(), publish );
 	}
 
-	void assign_functionoid_direct( callable_base && source, vtable const & empty_handler_vtable ) noexcept( ( Traits::moveable >= support_level::nofail ) || ( Traits::moveable == support_level::na && Traits::copyable >= support_level::nofail ) )
+	void assign_functionoid_direct( callable_base && source, vtable const & empty_handler_vtable, publish_order const publish = {} ) noexcept( ( Traits::moveable >= support_level::nofail ) || ( Traits::moveable == support_level::na && Traits::copyable >= support_level::nofail ) )
 	{
         source.move_to( *this );
-		this ->store_vtable( &source.get_vtable() );
-		source.store_vtable( &empty_handler_vtable );
+		this ->store_vtable( source.get_vtable(), publish );
+		source.store_vtable( empty_handler_vtable );
 	}
 
     static constexpr bool compatible_vtable_function_entry( support_level const me, support_level const other ) noexcept
@@ -1178,7 +1230,7 @@ private: // Assignment from another functionoid helpers.
     }
 
     template <typename OtherTraits>
-    void assign_functionoid_direct( callable_base<OtherTraits> const & source, vtable const & /*empty_handler_vtable*/ ) noexcept( OtherTraits::copyable >= support_level::nofail )
+    void assign_functionoid_direct( callable_base<OtherTraits> const & source, vtable const & /*empty_handler_vtable*/, publish_order const publish = {} ) noexcept( OtherTraits::copyable >= support_level::nofail )
 	{
         static_assert( compatible_vtables<OtherTraits>() );
         static_assert( Traits::sbo_size      >= OtherTraits::sbo_size      );
@@ -1194,15 +1246,15 @@ private: // Assignment from another functionoid helpers.
 
         auto & source_vtable{ source.get_vtable() } ;
         static_assert( sizeof( *p_vtable_ ) == sizeof( source_vtable ) );
-		store_vtable( reinterpret_cast<vtable const *>( &source_vtable ) );
+		store_vtable( reinterpret_cast<vtable const &>( source_vtable ), publish );
 	}
 
 	template <typename EmptyHandler, typename FunctionBaseRef>
-	void assign_functionoid_guarded( FunctionBaseRef && source, vtable const & empty_handler_vtable )
+	void assign_functionoid_guarded( FunctionBaseRef && source, vtable const & empty_handler_vtable, publish_order const publish = {} )
 	{
 		destroy();
 		cleaner<EmptyHandler> guard( *this, empty_handler_vtable );
-		assign_functionoid_direct( std::forward<FunctionBaseRef>( source ), empty_handler_vtable );
+		assign_functionoid_direct( std::forward<FunctionBaseRef>( source ), empty_handler_vtable, publish );
 		guard.cancel();
 	}
 
@@ -1232,12 +1284,7 @@ private: template <typename OtherTraits> friend class callable_base;
 	class safe_mover_base;
 	template <class EmptyHandler> class safe_mover;
 
-	// __restrict promises the pointer is not aliased - which is exactly what
-	// concurrent_reads says it is (and std::atomic_ref cannot bind to a
-	// restrict-qualified lvalue anyway), so the opt-in drops it.
-	// mutable: load_vtable() is const, and std::atomic_ref's const-T
-	// specialization is both unnecessary here and libc++-buggy.
-	mutable std::conditional_t<Traits::concurrent_reads, vtable const *, vtable const * __restrict> p_vtable_;
+			vtable const * __restrict p_vtable_;
 	mutable buffer                    functor_ ;
 }; // class callable_base
 
@@ -1263,7 +1310,7 @@ public:
 		empty_function_to_move_to_{ empty_function_to_move_to              },
 		empty_handler_vtable_     { empty_function_to_move_to.get_vtable() }
 	{
-		BOOST_ASSERT( empty_function_to_move_to_.load_vtable( std::memory_order_relaxed ) == &empty_handler_vtable_ );
+		BOOST_ASSERT( empty_function_to_move_to_.vtable_slot( std::memory_order_relaxed ) == &empty_handler_vtable_ );
 		move( function_to_guard, empty_function_to_move_to_, empty_handler_vtable_ );
 	}
 
@@ -1274,7 +1321,7 @@ public:
 	{
         source.move_to( destination );
 		destination.store_vtable( source.load_vtable( std::memory_order_relaxed ) );
-		source     .store_vtable( &empty_handler_vtable );
+		source     .store_vtable( empty_handler_vtable );
 	}
 
 protected:
