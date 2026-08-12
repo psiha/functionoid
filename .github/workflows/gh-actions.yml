@@ -10,18 +10,30 @@ jobs:
   build:
     name: ${{ matrix.config.name }} — ${{ matrix.build_type }}
     runs-on: ${{ matrix.config.os }}
-    timeout-minutes: 20
+    container: ${{ matrix.config.container || '' }}
+    timeout-minutes: 25
 
     strategy:
       fail-fast: false
       matrix:
         config:
-          - { os: ubuntu-latest, name: Clang, cc: clang, cxx: clang++, gen: '-G Ninja' }
-          - { os: macos-26, name: Apple-Clang, cc: clang, cxx: clang++, gen: '-G Ninja' }
+          - { os: ubuntu-latest,  name: Clang,       cc: clang,  cxx: clang++, gen: '-G Ninja' }
+          - { os: ubuntu-latest,  name: GCC,         cc: gcc,    cxx: g++,     gen: '-G Ninja', container: 'gcc:16' }
+          - { os: macos-26,       name: Apple-Clang, cc: clang,  cxx: clang++, gen: '-G Ninja' }
+          # windows-2025 carries Visual Studio 2026 (runner-images migration,
+          # June 2026), so the default generator is the VS 2026 one.
+          - { os: windows-2025,   name: MSVC,        gen: '-A x64' }
+          - { os: windows-2025,   name: Clang-CL,    gen: '-A x64 -T ClangCL' }
         build_type: [Debug, Release]
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install build tools (GCC container)
+        if: matrix.config.name == 'GCC'
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends cmake ninja-build git ca-certificates
 
       - name: Install LLVM/Clang 22 (Linux)
         if: matrix.config.name == 'Clang'
@@ -32,7 +44,12 @@ jobs:
           echo "CC=/usr/lib/llvm-22/bin/clang" >> $GITHUB_ENV
           echo "CXX=/usr/lib/llvm-22/bin/clang++" >> $GITHUB_ENV
 
-      - name: Configure
+      # The Windows generators are multi-config and pick their own toolset
+      # (-T), so they take neither an explicit compiler nor CMAKE_BUILD_TYPE —
+      # the configuration is chosen at build/test time via --config / -C.
+      - name: Configure (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
           cmake -B build ${{ matrix.config.gen }} \
             -DCMAKE_CXX_COMPILER="${CXX:-${{ matrix.config.cxx }}}" \
@@ -40,7 +57,12 @@ jobs:
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             -S .
 
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: cmake -B build ${{ matrix.config.gen }} -S .
+
       - name: Build & test
+        shell: bash
         run: |
           cmake --build build --config ${{ matrix.build_type }} -j
           cd build/test

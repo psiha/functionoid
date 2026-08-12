@@ -38,6 +38,21 @@ namespace boost
 template <typename T> class reference_wrapper;
 }
 //------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+//   Scoped to GCC 16, the only release observed to need it, so the workaround
+// expires by itself: a later GCC compiles the annotation away, and if the
+// miscompile is still there the GCC lane says so loudly rather than the
+// library quietly carrying a pessimization forever. (clang reports
+// __GNUC__ == 4, so it is excluded by the version test alone - the explicit
+// guard is for compilers that impersonate a newer GCC.)
+#if defined( __GNUC__ ) && ( __GNUC__ == 16 ) && !defined( __clang__ )
+    // GCC's `optimize` attribute resets the function's option set, so it is
+    // applied to as little code as possible - see the note at its use site.
+#   define PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND [[ gnu::optimize( "no-ipa-modref" ) ]]
+#else
+#   define PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND
+#endif
 namespace psi::functionoid
 {
 //------------------------------------------------------------------------------
@@ -162,6 +177,17 @@ auto const invalid_ptr( reinterpret_cast<void const *>( static_cast<std::ptrdiff
 template <typename T> void debug_clear( T & ) {}
 #endif // _DEBUG
 
+//   gcc-16 (only) miscompiles the small-object store below at -O2 -DNDEBUG:
+// interprocedural mod/ref analysis drops the placement-new into the function
+// buffer, so a later invoke reads a garbage target and segfaults. Pinned here,
+// on the STORE, rather than on invoke_impl - annotating either end cures it,
+// and this one is a single placement-new on the assignment path while
+// invoke_impl is the hot path taken by every call.
+//   Reduced to ~20 lines (a move-only callable assigned a reference-capturing
+// lambda, then invoked); clang is unaffected and plain -O2 without NDEBUG is
+// fine. Reported upstream: https://gcc.gnu.org/bugzilla/ - PR number to be
+// filled in here once the report is filed; drop the workaround when it is
+// fixed.
 /// Manager for trivial objects that fit into sizeof( void * ).
 struct manager_ptr
 {
@@ -171,7 +197,7 @@ struct manager_ptr
     static auto functor_ptr( function_buffer_base const & buffer ) { BOOST_ASSUME( buffer.obj_ptr ); return &buffer.obj_ptr; }
 
     template <typename Functor, typename Allocator>
-    static void assign( Functor const functor, function_buffer_base & out_buffer, Allocator ) noexcept
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void assign( Functor const functor, function_buffer_base & out_buffer, Allocator ) noexcept
     {
         static_assert( functor_traits<Functor, function_buffer_base>::allowsPtrObjectOptimization );
 #   ifdef _MSC_VER
@@ -181,14 +207,14 @@ struct manager_ptr
         new ( functor_ptr( out_buffer ) ) Functor( functor );
     }
 
-    static void clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer ) noexcept
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer ) noexcept
     {
 		//...zzz...even with __assume MSVC still generates branching code...
         //assign( *functor_ptr( in_buffer ), out_buffer, dummy_allocator() );
         out_buffer.obj_ptr = in_buffer.obj_ptr;
     }
 
-    static void move( function_buffer_base && in_buffer, function_buffer_base & out_buffer ) noexcept
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void move( function_buffer_base && in_buffer, function_buffer_base & out_buffer ) noexcept
     {
         clone( in_buffer, out_buffer );
         destroy( in_buffer );
@@ -209,7 +235,7 @@ struct manager_trivial_small
     static void * functor_ptr( function_buffer_base & buffer ) { return &buffer; }
 
     template <typename Functor, typename Allocator>
-    static void assign( Functor const & functor, Buffer & out_buffer, Allocator ) noexcept
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void assign( Functor const & functor, Buffer & out_buffer, Allocator ) noexcept
     {
         static_assert
         (
@@ -223,12 +249,12 @@ struct manager_trivial_small
         new ( functor_ptr( out_buffer ) ) Functor( functor );
     }
 
-    static void clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
     {
         assign( Buffer::from_base( in_buffer ), Buffer::from_base( out_buffer ), dummy_allocator{} );
     }
 
-    static void move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
     {
         clone( in_buffer, out_buffer );
         destroy( in_buffer );
@@ -255,7 +281,7 @@ public:
     static void const * functor_ptr( function_buffer_base const & buffer ) { return functor_ptr( const_cast<function_buffer_base &>( buffer ) ); }
 
     template <typename Functor>
-    static void assign( Functor const & functor, function_buffer_base & out_buffer, [[ maybe_unused ]] Allocator const a )
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void assign( Functor const & functor, function_buffer_base & out_buffer, [[ maybe_unused ]] Allocator const a )
     {
         static_assert
         (
@@ -271,7 +297,7 @@ public:
         clone( in_buffer, out_buffer );
     }
 
-    static void clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer )
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer )
     {
         BOOST_ASSERT( ( out_buffer.trivial_heap_obj.ptr  == 0 ) || ( out_buffer.trivial_heap_obj.ptr  == reinterpret_cast<void const *>( -1 ) ) );
         BOOST_ASSERT( ( out_buffer.trivial_heap_obj.size == 0 ) || ( out_buffer.trivial_heap_obj.size == static_cast     <std::size_t >( -1 ) ) );
@@ -282,7 +308,7 @@ public:
         std::memcpy( functor_ptr( out_buffer ), functor_ptr( in_buffer ), storage_size );
     }
 
-    static void move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
     {
         out_buffer.trivial_heap_obj = in_buffer.trivial_heap_obj;
         debug_clear( in_buffer.trivial_heap_obj );
@@ -311,7 +337,7 @@ struct manager_small
     static Functor const * functor_ptr( function_buffer_base const & buffer ) { return functor_ptr( const_cast<function_buffer_base &>( buffer ) ); }
 
     template <typename F, typename Allocator>
-    static void assign( F && functor, Buffer & out_buffer, Allocator ) noexcept( noexcept( Functor( std::forward<F>( functor ) ) ) )
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void assign( F && functor, Buffer & out_buffer, Allocator ) noexcept( noexcept( Functor( std::forward<F>( functor ) ) ) )
     {
 #   ifdef _MSC_VER
         // MSVC14u3 still generates a branch w/o this (GCC issues a warning that it knows that &out_buffer cannot be null so we have to ifdef guard this).
@@ -320,13 +346,13 @@ struct manager_small
         new ( functor_ptr( out_buffer ) ) Functor( std::forward<F>( functor ) );
     }
 
-    static void clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer ) noexcept( std::is_nothrow_copy_constructible_v<Functor> )
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void clone( function_buffer_base const & in_buffer, function_buffer_base & out_buffer ) noexcept( std::is_nothrow_copy_constructible_v<Functor> )
     {
         auto const & __restrict in_functor( *functor_ptr( in_buffer ) );
         assign( in_functor, Buffer::from_base( out_buffer ), dummy_allocator() );
     }
 
-    static void move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept( std::is_nothrow_move_constructible_v<Functor> )
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept( std::is_nothrow_move_constructible_v<Functor> )
     {
         auto & __restrict in_functor( *functor_ptr( in_buffer ) );
         assign( std::move( in_functor ), Buffer::from_base( out_buffer ), dummy_allocator{} );
@@ -370,7 +396,7 @@ public:
     }
 
 	template <typename F>
-    static void assign( F && functor, function_buffer_base & out_buffer, OriginalAllocator source_allocator )
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void assign( F && functor, function_buffer_base & out_buffer, OriginalAllocator source_allocator )
     {
         auto constexpr does_not_need_guard
         {
@@ -389,13 +415,13 @@ public:
 #if BOOST_MSVC // Bogus heap-overflow failure w/ VS 16.10 in implicit memcpy of OriginalAllocator{ in_functor_and_allocator.allocator() }
     __declspec( no_sanitize_address )
 #endif // BOOST_MSVC
-    static void clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer )
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void clone( function_buffer_base const & __restrict in_buffer, function_buffer_base & __restrict out_buffer )
     {
         functor_and_allocator_t const & in_functor_and_allocator{ *functor_ptr( in_buffer ) };
         assign( in_functor_and_allocator.functor(), out_buffer, in_functor_and_allocator.allocator() );
     }
 
-    static void move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void move( function_buffer_base && __restrict in_buffer, function_buffer_base & __restrict out_buffer ) noexcept
     {
         manager_trivial_heap<OriginalAllocator>::move( std::move( in_buffer ), out_buffer );
     }
@@ -583,7 +609,7 @@ struct cloner<support_level::trivial>
 {
     constexpr cloner( void const * ) noexcept {}
     template <typename Buffer>
-    static void clone( Buffer const & __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept { out_buffer = in_buffer; }
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void clone( Buffer const & __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept { out_buffer = in_buffer; }
 };
 template <>
 struct cloner<support_level::na> { constexpr cloner( void const * ) noexcept {} };
@@ -599,7 +625,7 @@ struct mover<support_level::trivial>
 {
     constexpr mover( void const * ) noexcept {}
     template <typename Buffer>
-    static void move( Buffer && __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept { cloner<support_level::trivial>::clone( in_buffer, out_buffer ); }
+    PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void move( Buffer && __restrict in_buffer, Buffer & __restrict out_buffer ) noexcept { cloner<support_level::trivial>::clone( in_buffer, out_buffer ); }
 };
 template <>
 struct mover<support_level::na> { constexpr mover( void const * ) noexcept {} };
@@ -1317,7 +1343,7 @@ public:
 public:
 	void cancel() noexcept { BOOST_ASSERT( p_function_to_restore_to_ ); p_function_to_restore_to_ = 0; }
 
-	static void move( callable_base & source, callable_base & destination, vtable const & empty_handler_vtable ) noexcept
+	PSI_FUNCTIONOID_GCC16_MODREF_WORKAROUND static void move( callable_base & source, callable_base & destination, vtable const & empty_handler_vtable ) noexcept
 	{
         source.move_to( destination );
 		destination.store_vtable( source.load_vtable( std::memory_order_relaxed ) );
