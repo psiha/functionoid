@@ -33,13 +33,38 @@ class [[ clang::trivial_abi ]] function_ref<R( Args... ) noexcept( ne )>
 public:
     constexpr function_ref() = default;
 
+    /// Whether \c make_c_callback stores \c F by value in the data word instead
+    /// of pointing at the caller's object — i.e. whether this ref borrows at all.
+    template <typename F>
+    static bool constexpr stored_inline
+    {
+        std::is_trivially_copy_constructible_v<std::remove_reference_t<F>> &&
+        ( sizeof( std::remove_reference_t<F> ) <= sizeof( void * ) )
+    };
+
+    template <typename F>
+    static bool constexpr invocable_as
+    { noexcept( std::declval<F &>()( std::declval<Args>()... ) ) >= ne };
+
+    /// Borrowing overload: the target stays where the caller put it, so it must
+    /// outlive this ref — hence \c lifetimebound.
     template <typename F>
     function_ref( F && callable [[ clang::lifetimebound ]] ) noexcept
-    requires ( noexcept( callable( std::declval<Args>()... ) ) >= ne )
+    requires ( invocable_as<F> && !stored_inline<F> )
     {
-        auto const cb{ make_c_callback( std::forward<F>( callable ) ) };
-        data_     = cb.first;
-        function_ = static_cast<decltype( function_ )>( cb.second );
+        bind( std::forward<F>( callable ) );
+    }
+
+    /// Copying overload: a trivially copyable callable that fits the data word is
+    /// COPIED into this ref, which therefore borrows nothing — so binding a
+    /// temporary (a lambda built in the argument, a function pointer) is safe and
+    /// must not be diagnosed. It needs to be a separate overload because
+    /// `[[clang::lifetimebound]]` cannot be applied conditionally.
+    template <typename F>
+    function_ref( F && callable ) noexcept
+    requires ( invocable_as<F> && stored_inline<F> )
+    {
+        bind( std::forward<F>( callable ) );
     }
 
     template <typename... CallArgs>
@@ -126,6 +151,15 @@ public:
                 make_exception_tunneling_callable( std::forward<F>( callable ) )
             );
         }
+    }
+
+private:
+    template <typename F>
+    void bind( F && callable ) noexcept
+    {
+        auto const cb{ make_c_callback( std::forward<F>( callable ) ) };
+        data_     = cb.first;
+        function_ = static_cast<decltype( function_ )>( cb.second );
     }
 
 private:
