@@ -34,3 +34,16 @@ target_link_libraries( functionoid_vtable_attrs PRIVATE GTest::gtest_main Psi::F
 
 set_target_properties( functionoid_vtable_attrs PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test" )
 add_test( NAME functionoid_vtable_attrs COMMAND functionoid_vtable_attrs )
+
+# Module correctness smoke test (module.cmake, PSI_FUNCTIONOID_MODULE) — only built when the
+# option is on, so it adds nothing to the default (off) CI matrix.
+if ( PSI_FUNCTIONOID_MODULE AND TARGET PsiFunctionoidModule )
+    add_executable( functionoid_module_smoke_test EXCLUDE_FROM_ALL "${CMAKE_CURRENT_SOURCE_DIR}/module_smoke_test.cpp" )
+    target_link_libraries( functionoid_module_smoke_test PRIVATE Psi::FunctionoidModule )
+    set_target_properties( functionoid_module_smoke_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
+        CXX_SCAN_FOR_MODULES ON
+        DISABLE_PRECOMPILE_HEADERS ON
+    )
+    add_test( NAME functionoid_module_smoke_test COMMAND functionoid_module_smoke_test )
+endif()
