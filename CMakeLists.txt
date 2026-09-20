@@ -66,6 +66,7 @@ endif()
 ###################
 
 include( ${CMAKE_CURRENT_LIST_DIR}/functionoid.cmake )
+include( ${CMAKE_CURRENT_LIST_DIR}/module.cmake )
 
 ###################
 ## Tests
